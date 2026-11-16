@@ -1,0 +1,10 @@
+.DS_Store
+node_modules
+dist
+*.log
+*.tgz
+.turbo
+
+# Claude Code: personal and generated files
+.claude/worktrees/
+.claude/settings.local.json
