@@ -30,7 +30,7 @@ Requires Node 24+.
 - An environment loads `.envs/.env`, then `.envs/.env.<name>`. Its own file wins over the base, both win over the shell.
 - Available environments: the `.envs/.env.*` files that exist.
 - No env files in the project root. Frameworks like Next.js load those on their own.
-- Values are parsed with `dotenv` and expanded with `dotenv-expand`, exactly like `dotenv-cli -e .envs/.env -e .envs/.env.<name> -o`. So `$VAR` and `${VAR:-default}` expand, and a literal `$` needs `\$`.
+- Values are parsed with `dotenv` and expanded with `dotenv-expand`, exactly like `dotenv-cli -e .envs/.env -e .envs/.env.<name> -o`. So `$VAR` and `${VAR:-default}` expand, and a literal `$` needs `\$`. Expansion runs over the merged env, so shell variables with a `$` in their value expand too.
 
 ## Commands
 

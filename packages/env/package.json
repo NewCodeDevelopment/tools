@@ -5,6 +5,19 @@
   "type": "module",
   "sideEffects": false,
   "license": "MIT",
+  "author": "NewCode",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NewCodeDevelopment/newenv.git"
+  },
+  "homepage": "https://github.com/NewCodeDevelopment/newenv#readme",
+  "bugs": "https://github.com/NewCodeDevelopment/newenv/issues",
+  "keywords": [
+    "env",
+    "dotenv",
+    "environment",
+    "cli"
+  ],
   "bin": {
     "newenv": "./dist/cli.mjs"
   },
@@ -50,7 +63,7 @@
     "access": "public"
   },
   "engines": {
-    "node": "24.x"
+    "node": ">=24"
   },
   "files": [
     "dist"
