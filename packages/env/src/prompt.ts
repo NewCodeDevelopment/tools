@@ -1,6 +1,4 @@
 import type { Readable, Writable } from "node:stream";
-import confirmPrompt from "@inquirer/confirm";
-import input from "@inquirer/input";
 
 export interface Streams {
   input: Readable & { isTTY?: boolean };
@@ -21,10 +19,16 @@ export async function confirm(
     throw new Error(`${question}: needs confirmation, no TTY. Aborted.`);
   }
 
+  // Imported on demand: most runs never ask, and inquirer is the slowest dependency to load
   try {
-    return mode === "type-name"
-      ? (await input({ message: `${question}? Type "${name}" to confirm:` }, streams)) === name
-      : await confirmPrompt({ message: `${question}?`, default: false }, streams);
+    if (mode === "type-name") {
+      const { default: input } = await import("@inquirer/input");
+      return (
+        (await input({ message: `${question}? Type "${name}" to confirm:` }, streams)) === name
+      );
+    }
+    const { default: confirmPrompt } = await import("@inquirer/confirm");
+    return await confirmPrompt({ message: `${question}?`, default: false }, streams);
   } catch (error) {
     if (error instanceof Error && error.name === "ExitPromptError") {
       return false;
