@@ -39,7 +39,7 @@ Requires Node 24+.
 | `newenv <command> [args]` | Run with the selected environment |
 | `newenv use <name>` | Switch environment (`local` deletes `.envs/current`) |
 | `newenv status` | Active environment and its files, never values |
-| `newenv init` | Create `.envs/`, gitignore rules and `.envs/.env.local` |
+| `newenv init` | Create `.envs/`, gitignore rules, `.envs/.env.local` and `newenv.config.ts` |
 | `newenv -- <command>` | Run a program named `use`, `status` or `init` |
 
 Options go before the command, and parsing stops at the first argument that isn't one: `newenv next dev --turbopack` passes `--turbopack` to Next.
@@ -56,10 +56,10 @@ Outside package scripts, run it with `pnpm newenv use staging` or `pnpm exec new
 
 1. **Passthrough:** with a `passthrough` variable set, the command runs as is with the existing env. None by default.
 2. **Root env files** (`.env`, `.env.local`, `.env.development`, `.env.production` and their `.local` variants): refused, with the `mv` command.
-3. **Forbidden base keys** (`DATABASE_URL`): refused in `.envs/.env`, since the base applies to every environment.
+3. **Forbidden base keys** (`forbiddenInBase`): refused in `.envs/.env`, since the base applies to every environment. None by default.
 4. **Missing environment file:** refused, with a hint.
 5. **Banner** on stderr outside local: a yellow badge, red for production, plus the script and files.
-6. **Confirmation** for `confirmScripts` (`db:push`, `db:migrate`, `db:seed`), matched on `npm_lifecycle_event`: `y/N`, or typing the name for production. Without a TTY it aborts, so agents and CI can't run them by accident. Local never asks.
+6. **Confirmation** for `confirmScripts`, matched on `npm_lifecycle_event`, and for `--confirm`: `y/N`, or typing the name for production. Without a TTY it aborts, so agents and CI can't run them by accident. Local never asks. No scripts by default.
 7. **Runs** the command with inherited stdio, passes the exit code through and forwards signals.
 
 ### Switching
@@ -81,9 +81,10 @@ pnpm newenv init
 Created .envs/
 Updated .gitignore
 Created .envs/.env.local from .envs/.env.example
+Created newenv.config.ts
 ```
 
-The example is the first of `.envs/.env.example`, `.example-env` and `.env.example`. Existing files are kept. The gitignore rules:
+The example is the first of `.envs/.env.example`, `.example-env` and `.env.example`. Existing files are kept. No script or base key is guarded by default, so the config starts with `db:push`, `db:migrate`, `db:seed` and `DATABASE_URL` to edit. The gitignore rules:
 
 ```gitignore
 # newenv
@@ -97,7 +98,7 @@ A `.env*` pattern also matches the `.envs` folder, and git can't re-include a fi
 
 ## Config
 
-Optional. `newenv.config.ts`, `.mjs` or `.js` in the project root, for exceptions:
+Optional. `newenv.config.ts`, `.mjs` or `.js` in the project root. `newenv init` creates one:
 
 ```ts
 import { defineConfig } from "@newcode-team/env";
@@ -116,8 +117,8 @@ export default defineConfig({
 |---|---|---|
 | `environments.<name>.color` | `red` for production, else `yellow` | Badge: `red`, `yellow`, `green`, `blue`, `magenta`, `cyan`, `gray` |
 | `environments.<name>.confirm` | `"type-name"` for production, `false` for local, else `true` | `true`: y/N. `"type-name"`: type the name, and `use` asks first. `false`: never |
-| `confirmScripts` | `["db:push", "db:migrate", "db:seed"]` | Scripts that ask before running |
-| `forbiddenInBase` | `["DATABASE_URL"]` | Keys refused in `.envs/.env` |
+| `confirmScripts` | `[]` | Scripts that ask before running |
+| `forbiddenInBase` | `[]` | Keys refused in `.envs/.env` |
 | `passthrough` | `[]` | Variables that skip the files, e.g. `["VERCEL"]` on a host that provides the env |
 | `example` | | Source for `newenv init` |
 

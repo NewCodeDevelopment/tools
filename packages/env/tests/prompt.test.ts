@@ -51,6 +51,12 @@ describe("prepareRun", () => {
     expect((await prepareRun("drizzle-kit", studio)).A).toBe("staging");
   });
 
+  it("asks for no script by default", async () => {
+    const cwd = fixture({ ...files, ".envs/current": "production" });
+    const ctx = { ...context(cwd, { npm_lifecycle_event: "db:push" }), config: defaults };
+    expect((await prepareRun("drizzle-kit", ctx)).A).toBe("production");
+  });
+
   it("asks to type the name for production", async () => {
     const cwd = fixture({ ...files, ".envs/current": "production" });
     const migrate = { npm_lifecycle_event: "db:migrate" };

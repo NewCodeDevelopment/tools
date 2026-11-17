@@ -132,10 +132,11 @@ describe("checkFiles", () => {
 
   it("refuses forbidden keys in the base", () => {
     const cwd = fixture({ ".envs/.env": "A=1\nDATABASE_URL=x", ".envs/.env.local": "" });
-    expect(() => checkFiles(cwd, defaults, "local")).toThrow(
+    const config = { ...defaults, forbiddenInBase: ["DATABASE_URL"] };
+    expect(() => checkFiles(cwd, config, "local")).toThrow(
       /DATABASE_URL in the shared \.envs\/\.env/,
     );
-    expect(() => checkFiles(cwd, { ...defaults, forbiddenInBase: [] }, "local")).not.toThrow();
+    expect(() => checkFiles(cwd, defaults, "local")).not.toThrow();
   });
 
   it("refuses a missing environment file with a hint", () => {

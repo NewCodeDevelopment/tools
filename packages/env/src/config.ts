@@ -23,11 +23,11 @@ export interface Config {
    */
   environments?: Record<string, EnvironmentConfig>;
   /**
-   * Scripts (`npm_lifecycle_event`) that ask before running. Default: db:push, db:migrate, db:seed
+   * Scripts (`npm_lifecycle_event`) that ask before running. Default: none
    */
   confirmScripts?: string[];
   /**
-   * Keys refused in the shared `.envs/.env`. Default: DATABASE_URL
+   * Keys refused in the shared `.envs/.env`. Default: none
    */
   forbiddenInBase?: string[];
   /**
@@ -53,8 +53,8 @@ export const defineConfig = (config: Config): Config => config;
 
 export const defaults: ResolvedConfig = {
   environments: {},
-  confirmScripts: ["db:push", "db:migrate", "db:seed"],
-  forbiddenInBase: ["DATABASE_URL"],
+  confirmScripts: [],
+  forbiddenInBase: [],
   passthrough: [],
 };
 

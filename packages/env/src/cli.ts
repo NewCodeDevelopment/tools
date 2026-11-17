@@ -36,6 +36,16 @@ const gitignoreBlock = ["# newenv", "/.env*", "!/.envs/", "/.envs/*", "!/.envs/.
 
 const exampleFiles = [".envs/.env.example", ".example-env", ".env.example"];
 
+// newenv guards no script or base key by default, so init writes a starting point to edit. The
+// type import is erased, so the config also loads where the package can't be resolved.
+const configTemplate = `import type { Config } from "@newcode-team/env";
+
+export default {
+  confirmScripts: ["db:push", "db:migrate", "db:seed"],
+  forbiddenInBase: ["DATABASE_URL"],
+} satisfies Config;
+`;
+
 const program = new Command("newenv")
   .description("Run a command with the env files of the selected environment")
   .usage("[options] <command> [args...]")
@@ -148,7 +158,7 @@ if (argv[argv.findIndex((arg) => arg === "--" || !arg.startsWith("-"))] !== "--"
 
   program
     .command("init")
-    .description("Set up .envs/, the gitignore rules and .envs/.env.local")
+    .description("Set up .envs/, the gitignore rules, .envs/.env.local and the config")
     .action(async () => {
       const config = await loadConfig(cwd);
       const dir = join(cwd, envsDir);
@@ -176,6 +186,11 @@ if (argv[argv.findIndex((arg) => arg === "--" || !arg.startsWith("-"))] !== "--"
         }
       }
 
+      const configFile = config.file ?? "newenv.config.ts";
+      if (!config.file) {
+        writeFileSync(join(cwd, configFile), configTemplate, { flag: "wx" });
+      }
+
       console.log(
         [
           `${dirExists ? "Exists " : "Created"} .envs/`,
@@ -183,6 +198,7 @@ if (argv[argv.findIndex((arg) => arg === "--" || !arg.startsWith("-"))] !== "--"
           localExists
             ? "Exists  .envs/.env.local"
             : `Created .envs/.env.local ${example ? `from ${example}` : "(empty, no example file)"}`,
+          `${config.file ? "Exists " : "Created"} ${configFile}`,
         ].join("\n"),
       );
     });

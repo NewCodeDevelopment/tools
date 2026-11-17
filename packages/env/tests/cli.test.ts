@@ -144,7 +144,14 @@ describe("run", () => {
     expect(root.stderr).toMatch(/newenv: \.env\.local in the project root/);
     expect(root.stdout).toBe("");
 
-    const base = await run(marker, fixture({ ...files, ".envs/.env": "DATABASE_URL=x" }));
+    const base = await run(
+      marker,
+      fixture({
+        ...files,
+        ".envs/.env": "DATABASE_URL=x",
+        "newenv.config.mjs": `export default { forbiddenInBase: ["DATABASE_URL"] };\n`,
+      }),
+    );
     expect(base.stderr).toMatch(/DATABASE_URL in the shared/);
     expect(base.stdout).toBe("");
 
@@ -155,7 +162,11 @@ describe("run", () => {
   });
 
   it("aborts confirm scripts without a TTY", async () => {
-    const cwd = fixture({ ...files, ".envs/current": "production" });
+    const cwd = fixture({
+      ...files,
+      ".envs/current": "production",
+      "newenv.config.mjs": `export default { confirmScripts: ["db:push"] };\n`,
+    });
     const result = await run([process.execPath, "-e", "console.log('ran')"], cwd, {
       npm_lifecycle_event: "db:push",
     });
@@ -220,6 +231,17 @@ describe("status", () => {
 });
 
 describe("config", () => {
+  it("guards no scripts or base keys without a config", async () => {
+    const cwd = fixture({
+      ...files,
+      ".envs/.env": "DATABASE_URL=x",
+      ".envs/current": "production",
+    });
+    const result = await run(printEnv("WHERE"), cwd, { npm_lifecycle_event: "db:push" });
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({ WHERE: "production" });
+  });
+
   it("loads newenv.config.ts", async () => {
     const cwd = fixture({
       ...files,
@@ -255,11 +277,14 @@ describe("init", () => {
     const first = await run(["init"], cwd);
     expect(first.code).toBe(0);
     expect(first.stdout).toBe(
-      "Exists  .envs/\nUpdated .gitignore\nCreated .envs/.env.local from .envs/.env.example\n",
+      "Exists  .envs/\nUpdated .gitignore\nCreated .envs/.env.local from .envs/.env.example\nCreated newenv.config.ts\n",
     );
+    const config = readFileSync(join(cwd, "newenv.config.ts"), "utf8");
+    expect(config).toMatch(/confirmScripts: \["db:push", "db:migrate", "db:seed"\]/);
+    expect(config).toMatch(/forbiddenInBase: \["DATABASE_URL"\]/);
     expect(readFileSync(join(cwd, ".envs/.env.local"), "utf8")).toBe("A=example");
     expect((await run(["init"], cwd)).stdout).toBe(
-      "Exists  .envs/\nExists  .gitignore\nExists  .envs/.env.local\n",
+      "Exists  .envs/\nExists  .gitignore\nExists  .envs/.env.local\nExists  newenv.config.ts\n",
     );
 
     [".envs/.env", ".envs/current", ".env", ".env.production.local"].forEach((file) => {
@@ -290,5 +315,11 @@ describe("init", () => {
       /Created \.envs\/\nUpdated \.gitignore\nCreated \.envs\/\.env\.local \(empty/,
     );
     expect(readFileSync(join(cwd, ".envs/.env.local"), "utf8")).toBe("");
+  });
+
+  it("keeps an existing config", async () => {
+    const cwd = fixture({ "newenv.config.mjs": "export default {};\n" });
+    expect((await run(["init"], cwd)).stdout).toMatch(/Exists {2}newenv\.config\.mjs\n$/);
+    expect(existsSync(join(cwd, "newenv.config.ts"))).toBe(false);
   });
 });

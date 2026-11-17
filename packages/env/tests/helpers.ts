@@ -39,7 +39,7 @@ export function streams(answer?: string): Streams & { written: () => string } {
 export const context = (cwd: string, env: NodeJS.ProcessEnv = {}, answer?: string) => ({
   cwd,
   env,
-  config: defaults,
+  config: { ...defaults, confirmScripts: ["db:push", "db:migrate"] },
   streams: streams(answer),
 });
 
