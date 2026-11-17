@@ -1,6 +1,6 @@
 {
   "name": "@newcode-team/env",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Per-environment env files for any command, with switching and guards",
   "type": "module",
   "sideEffects": false,
