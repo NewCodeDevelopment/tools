@@ -1,0 +1,26 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 100,
+  "trailingComma": "all",
+  "sortPackageJson": false,
+  "sortImports": {
+    "newlinesBetween": false,
+    "partitionByNewline": true,
+    "groups": [
+      "builtin",
+      "external",
+      ["internal", "subpath"],
+      ["parent", "sibling", "index"],
+      "style",
+      "unknown"
+    ]
+  },
+  "ignorePatterns": [
+    ".claude",
+    "**/node_modules",
+    "**/.turbo",
+    "**/dist",
+    "pnpm-lock.yaml",
+    "**/*.md"
+  ]
+}
