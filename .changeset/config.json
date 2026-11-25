@@ -7,7 +7,7 @@
   "linked": [],
   "access": "public",
   "updateInternalDependencies": "patch",
-  "ignore": [],
+  "ignore": ["@newcode-team/playground"],
   "privatePackages": {
     "version": true,
     "tag": false

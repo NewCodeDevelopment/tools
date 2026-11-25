@@ -2,7 +2,8 @@
   "$schema": "https://turbo.build/schema.json",
   "tasks": {
     "build": {
-      "outputs": ["dist/**"],
+      "inputs": ["$TURBO_DEFAULT$", ".envs/**"],
+      "outputs": ["dist/**", ".next/**", "!.next/cache/**"],
       "dependsOn": ["^build"]
     },
     "test": {
@@ -20,7 +21,7 @@
       "cache": false
     },
     "typecheck": {
-      "outputs": [],
+      "outputs": ["tsconfig.tsbuildinfo", ".next/types/**", ".next/dev/types/**"],
       "dependsOn": ["^build"]
     },
     "format": {
@@ -31,7 +32,8 @@
     },
     "dev": {
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "dependsOn": ["^build"]
     },
     "build:release": {
       "dependsOn": ["^build:release"],

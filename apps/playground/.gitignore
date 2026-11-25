@@ -1,0 +1,5 @@
+# newenv
+/.env*
+!/.envs/
+/.envs/*
+!/.envs/.env.example
