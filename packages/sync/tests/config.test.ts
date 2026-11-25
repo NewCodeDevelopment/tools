@@ -76,8 +76,90 @@ describe("resolveSyncConfig", () => {
       'sync.s3.secretAccessKey must be a variable name, such as "DATABASE_URL"',
     ],
     [{ s3: { provider: "aws" } }, 'sync.s3.provider must be "auto", "cloudflare" or "other"'],
+    [null, "sync must be an object"],
+    ["database", "sync must be an object"],
+    [{ database: null }, "sync.database must be false or an object"],
+    [{ s3: [] }, "sync.s3 must be false or an object"],
+    [
+      { s3: { region: "auto" } },
+      "sync.s3.region is not a known key. Known: endpoint, accessKeyId, secretAccessKey, bucket, provider",
+    ],
+    [
+      { database: { url: "" } },
+      'sync.database.url must be a variable name, such as "DATABASE_URL"',
+    ],
+    [
+      { database: { url: "1DATABASE" } },
+      'sync.database.url must be a variable name, such as "DATABASE_URL"',
+    ],
+    [
+      { s3: { endpoint: "https://account.r2.cloudflarestorage.com" } },
+      'sync.s3.endpoint must be a variable name, such as "DATABASE_URL"',
+    ],
+    [
+      { s3: { bucket: "my-bucket" } },
+      'sync.s3.bucket must be a variable name, such as "DATABASE_URL"',
+    ],
+    [
+      { s3: { accessKeyId: 5 } },
+      'sync.s3.accessKeyId must be a variable name, such as "DATABASE_URL"',
+    ],
+    [
+      { database: { schemas: ["public", 1] } },
+      "sync.database.schemas must be a non-empty list of names",
+    ],
+    [
+      { database: { schemas: ["my schema"] } },
+      "sync.database.schemas must be a non-empty list of names",
+    ],
+    [{ database: { schemas: ["1st"] } }, "sync.database.schemas must be a non-empty list of names"],
   ])("refuses %j with the path", (section, message) => {
     expect(() => resolveSyncConfig(section)).toThrow(new SyncError(message));
+  });
+});
+
+describe("resolveSyncConfig results", () => {
+  it("takes every valid name, and keeps what is given", () => {
+    expect(
+      resolveSyncConfig({
+        database: { url: "_DB_URL_2", schemas: ["public", "drizzle", "_private", "tenant$1"] },
+        s3: { provider: "cloudflare", bucket: "BUCKET" },
+      }),
+    ).toEqual({
+      database: { url: "_DB_URL_2", schemas: ["public", "drizzle", "_private", "tenant$1"] },
+      s3: { ...defaults.s3, provider: "cloudflare", bucket: "BUCKET" },
+    });
+  });
+
+  it("gives every call its own defaults, so one can't change another's", () => {
+    const first = resolveSyncConfig();
+    if (first.database) {
+      first.database.schemas.push("changed");
+    }
+    expect(resolveSyncConfig()).toEqual(defaults);
+    expect(defaults.database.schemas).toEqual(["public"]);
+  });
+
+  it("never repeats a refused value", () => {
+    const pasted = "postgres://app:pasted-password@db.example.com/app";
+    const messages = [
+      { database: { url: pasted } },
+      { database: { schemas: [pasted] } },
+      { s3: { secretAccessKey: pasted } },
+      { s3: { provider: pasted } },
+    ].map((section) => {
+      try {
+        resolveSyncConfig(section);
+        return "no error";
+      } catch (error) {
+        return String(error);
+      }
+    });
+    expect(messages).toHaveLength(4);
+    messages.forEach((message) => {
+      expect(message).toMatch(/^SyncError: sync\./);
+      expect(message).not.toContain("pasted-password");
+    });
   });
 });
 

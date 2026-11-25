@@ -4,6 +4,7 @@ import {
   connection,
   type Database,
   describeDatabase,
+  parseDatabaseUrl,
   resolveDatabase,
   sameDatabase,
 } from "../src/commands/database/helpers";
@@ -160,6 +161,48 @@ describe("databases", () => {
   });
 });
 
+describe("database URLs", () => {
+  it.each([
+    "postgres:///app",
+    "postgres:app",
+    "db.example.com/app",
+    "",
+    "http://db.example.com/app",
+  ])("refuses %j, naming where it came from and not the value", (value) => {
+    expect(() => parseDatabaseUrl(value, 'DATABASE_URL of environment "qa"')).toThrow(
+      new SyncError('DATABASE_URL of environment "qa" is not a postgres:// or postgresql:// URL.'),
+    );
+  });
+
+  it("takes both protocols", () => {
+    expect(parseDatabaseUrl("postgres://h/db", "x").hostname).toBe("h");
+    expect(parseDatabaseUrl("postgresql://h:6543/db", "x").port).toBe("6543");
+  });
+
+  it("takes the password from the URL or its password parameter, decoded", () => {
+    const encoded = connection(new URL("postgres://app:p%40ss%2Fw%3Ard@h/db?sslmode=require"));
+    expect(encoded.env.PGPASSWORD).toBe("p@ss/w:rd");
+    expect(encoded.dbname).toBe("postgres://app@h/db?sslmode=require");
+
+    const parameter = connection(
+      new URL("postgres://app@h/db?password=from-query&sslmode=require"),
+    );
+    expect(parameter.env.PGPASSWORD).toBe("from-query");
+    expect(parameter.dbname).toBe("postgres://app@h/db?sslmode=require");
+
+    expect(connection(new URL("postgres://app@h/db")).env).not.toHaveProperty("PGPASSWORD");
+  });
+
+  it("compares database names decoded, and the default port as 5432", () => {
+    const a = database("a", "postgres://h/my%20db");
+    expect(sameDatabase(a, database("b", "postgres://h:5432/my db"))).toBe(true);
+    expect(sameDatabase(a, database("b", "postgres://h/my_db"))).toBe(false);
+    expect(describeDatabase(database("staging", "postgres://u:p@h:6543/app?sslmode=require"))).toBe(
+      "staging (h:6543/app)",
+    );
+  });
+});
+
 describe("resolveBucket", () => {
   it("reads the configured variables of the environment, base included", async () => {
     const production = await resolveBucket("production", defaults.s3, fixture(files));
@@ -289,6 +332,22 @@ describe("buckets", () => {
       RCLONE_CONFIG_NEWSYNC_TARGET_ENDPOINT: "http://localhost:9000",
       RCLONE_CONFIG_NEWSYNC_TARGET_SECRET_ACCESS_KEY: "local-secret",
     });
+  });
+
+  it("compares endpoints without case or a trailing slash", () => {
+    const upper = bucket({ endpoint: "https://ACCOUNT.r2.cloudflarestorage.com/" });
+    expect(sameRemote(bucket(), upper)).toBe(true);
+    expect(sameBucket(bucket(), upper)).toBe(true);
+    expect(remotes(bucket(), upper).env.RCLONE_CONFIG_NEWSYNC_TARGET_ENDPOINT).toBe(
+      "https://account.r2.cloudflarestorage.com",
+    );
+    // Same host, another port: another storage
+    expect(
+      sameBucket(
+        bucket({ endpoint: "http://localhost:9000" }),
+        bucket({ endpoint: "http://localhost:9001" }),
+      ),
+    ).toBe(false);
   });
 
   it("finds the same bucket on the same endpoint", () => {
