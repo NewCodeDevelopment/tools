@@ -45,6 +45,7 @@
   },
   "devDependencies": {
     "@arethetypeswrong/core": "catalog:",
+    "@newcode-team/config": "workspace:*",
     "@types/cross-spawn": "^6.0.6",
     "@types/node": "catalog:",
     "dotenv-cli": "11.0.0",
@@ -53,6 +54,9 @@
     "typescript": "catalog:",
     "unrun": "catalog:",
     "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "@newcode-team/config": "workspace:^"
   },
   "publishConfig": {
     "access": "public"

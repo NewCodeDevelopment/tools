@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -22,6 +22,28 @@ export function fixture(files: Record<string, string> = {}): string {
   });
   return cwd;
 }
+
+/**
+ * Links @newcode-team/config and @newcode-team/env into the fixture's node_modules, so a
+ * newcode.config.ts that imports them loads as in a project
+ */
+export function linkPackages(cwd: string): void {
+  mkdirSync(join(cwd, "node_modules/@newcode-team"), { recursive: true });
+  const packages = {
+    config: fileURLToPath(new URL("../node_modules/@newcode-team/config", import.meta.url)),
+    env: fileURLToPath(new URL("..", import.meta.url)),
+  };
+  Object.entries(packages).forEach(([name, target]) => {
+    symlinkSync(target, join(cwd, "node_modules/@newcode-team", name), "junction");
+  });
+}
+
+/**
+ * The `env` section in a newcode.config.mjs
+ */
+export const envConfig = (section: object) => ({
+  "newcode.config.mjs": `export default { env: ${JSON.stringify(section)} };\n`,
+});
 
 /**
  * Fake prompt streams. With `answer`, input is a TTY that answers once

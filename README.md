@@ -4,6 +4,7 @@ Command-line tools for NewCode projects, released as separate packages under `@n
 
 | Package | Command | Does |
 | --- | --- | --- |
+| [`@newcode-team/config`](packages/config) | | Finds, loads and types `newcode.config.ts`, the config file the tools share |
 | [`@newcode-team/env`](packages/env) | `newenv` | Runs commands with per-environment env files, switches environments, guards dangerous scripts |
 | [`@newcode-team/sync`](packages/sync) | `newsync` | Copies databases and files between environments |
 

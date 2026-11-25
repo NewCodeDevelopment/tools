@@ -5,7 +5,7 @@ import { expand } from "dotenv-expand";
 import {
   type EnvironmentConfig,
   environmentSettings,
-  loadConfig,
+  loadEnvConfig,
   type ResolvedConfig,
 } from "./config";
 import { EnvironmentError } from "./errors";
@@ -168,7 +168,7 @@ export async function loadEnvironment(
   name?: string,
   { cwd = process.cwd(), shell }: { cwd?: string; shell?: Record<string, string | undefined> } = {},
 ): Promise<Environment> {
-  const config = await loadConfig(cwd);
+  const config = await loadEnvConfig(cwd);
   const host = shell ?? process.env;
   const passthrough = config.passthrough.filter((key) => host[key]);
 
@@ -204,7 +204,7 @@ export async function confirmEnvironment(
   question: string,
   { cwd = process.cwd() }: { cwd?: string } = {},
 ): Promise<boolean> {
-  const config = await loadConfig(cwd);
+  const config = await loadEnvConfig(cwd);
   return confirm(environmentSettings(config, name).confirm, name, question, {
     input: process.stdin,
     output: process.stderr,

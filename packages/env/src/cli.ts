@@ -9,10 +9,11 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
+import { loadConfig } from "@newcode-team/config";
 import { Command } from "commander";
 import { version } from "../package.json";
-import { environmentSettings, loadConfig } from "./config";
+import { environmentSettings, loadEnvConfig, resolveConfig } from "./config";
 import {
   baseFile,
   checkFiles,
@@ -37,14 +38,18 @@ const gitignoreBlock = ["# newenv", "/.env*", "!/.envs/", "/.envs/*", "!/.envs/.
 
 const exampleFiles = [".envs/.env.example", ".example-env", ".env.example"];
 
-// newenv guards no script or base key by default, so init writes a starting point to edit. The
-// type import is erased, so the config also loads where the package can't be resolved.
-const configTemplate = `import type { Config } from "@newcode-team/env";
+// newenv guards no script or base key by default, so init writes a starting point to edit
+const envSection = `  env: env({
+    confirmScripts: ["db:push", "db:migrate", "db:seed"],
+    forbiddenInBase: ["DATABASE_URL"],
+  }),`;
 
-export default {
-  confirmScripts: ["db:push", "db:migrate", "db:seed"],
-  forbiddenInBase: ["DATABASE_URL"],
-} satisfies Config;
+const configTemplate = `import { defineConfig } from "@newcode-team/config";
+import { env } from "@newcode-team/env";
+
+export default defineConfig({
+${envSection}
+});
 `;
 
 const program = new Command("newenv")
@@ -66,7 +71,7 @@ const program = new Command("newenv")
       return program.help({ error: argv.length > 0 });
     }
 
-    const config = await loadConfig(cwd);
+    const config = await loadEnvConfig(cwd);
     const env = await prepareRun(name, { cwd, env: process.env, config, streams }, options.confirm);
     const { code, signal } = await spawnCommand(name, args, env).catch(
       (error: NodeJS.ErrnoException) => {
@@ -102,7 +107,7 @@ if (argv[argv.findIndex((arg) => arg === "--" || !arg.startsWith("-"))] !== "--"
       }
 
       checkKnown(cwd, name);
-      const config = await loadConfig(cwd);
+      const config = await loadEnvConfig(cwd);
       if (
         environmentSettings(config, name).confirm === "type-name" &&
         !(await confirm(true, name, `Switch to ${name}`, streams))
@@ -118,7 +123,7 @@ if (argv[argv.findIndex((arg) => arg === "--" || !arg.startsWith("-"))] !== "--"
     .command("status")
     .description("Show the environment and its files")
     .action(async () => {
-      const config = await loadConfig(cwd);
+      const config = await loadEnvConfig(cwd);
       const name = currentEnvironment({ cwd });
       const envFile = `.envs/.env.${name}`;
       const files = [
@@ -140,7 +145,7 @@ if (argv[argv.findIndex((arg) => arg === "--" || !arg.startsWith("-"))] !== "--"
           ["Environment", name],
           ["Files", files.join(" + ")],
           ["Available", listEnvironments({ cwd }).join(", ") || "none"],
-          ["Config", config.file],
+          ["Config", config.file && relative(cwd, config.file)],
           [
             "Passthrough",
             passthrough.length > 0 ? `${passthrough.join(", ")} set, files ignored` : undefined,
@@ -157,7 +162,8 @@ if (argv[argv.findIndex((arg) => arg === "--" || !arg.startsWith("-"))] !== "--"
     .command("init")
     .description("Set up .envs/, the gitignore rules, .envs/.env.local and the config")
     .action(async () => {
-      const config = await loadConfig(cwd);
+      const loaded = await loadConfig({ cwd });
+      const config = resolveConfig(loaded.env, loaded.file);
       const dir = join(cwd, envsDir);
       const dirExists = existsSync(dir);
       mkdirSync(dir, { recursive: true });
@@ -183,10 +189,11 @@ if (argv[argv.findIndex((arg) => arg === "--" || !arg.startsWith("-"))] !== "--"
         }
       }
 
-      const configFile = config.file ?? "newenv.config.ts";
-      if (!config.file) {
-        writeFileSync(join(cwd, configFile), configTemplate, { flag: "wx" });
+      // An existing config is the project's: init only says what to add
+      if (!loaded.file) {
+        writeFileSync(join(cwd, "newcode.config.ts"), configTemplate, { flag: "wx" });
       }
+      const configFile = loaded.file ? relative(cwd, loaded.file) : "newcode.config.ts";
 
       console.log(
         [
@@ -195,7 +202,11 @@ if (argv[argv.findIndex((arg) => arg === "--" || !arg.startsWith("-"))] !== "--"
           localExists
             ? "Exists  .envs/.env.local"
             : `Created .envs/.env.local ${example ? `from ${example}` : "(empty, no example file)"}`,
-          `${config.file ? "Exists " : "Created"} ${configFile}`,
+          !loaded.file
+            ? `Created ${configFile}`
+            : loaded.env
+              ? `Exists  ${configFile}`
+              : `Exists  ${configFile} without an env section. Add it:\n\nimport { env } from "@newcode-team/env";\n\n${envSection}`,
         ].join("\n"),
       );
     });

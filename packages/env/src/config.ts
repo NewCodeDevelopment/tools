@@ -1,6 +1,4 @@
-import { existsSync } from "node:fs";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { loadConfig } from "@newcode-team/config";
 
 export type Color = "red" | "yellow" | "green" | "blue" | "magenta" | "cyan" | "gray";
 
@@ -17,7 +15,10 @@ export interface EnvironmentConfig {
   confirm?: boolean | "type-name";
 }
 
-export interface Config {
+/**
+ * The `env` section of newcode.config.ts
+ */
+export interface EnvConfig {
   /**
    * Settings per environment name
    */
@@ -41,7 +42,7 @@ export interface Config {
   example?: string;
 }
 
-export type ResolvedConfig = Required<Omit<Config, "example">> & {
+export type ResolvedConfig = Required<Omit<EnvConfig, "example">> & {
   example?: string;
   /**
    * The config file that was loaded
@@ -49,7 +50,17 @@ export type ResolvedConfig = Required<Omit<Config, "example">> & {
   file?: string;
 };
 
-export const defineConfig = (config: Config): Config => config;
+declare module "@newcode-team/config" {
+  interface Config {
+    env?: EnvConfig;
+  }
+}
+
+/**
+ * The `env` section of newcode.config.ts. Returns its input: it types the section and adds `env`
+ * to `Config`
+ */
+export const env = (section: EnvConfig): EnvConfig => section;
 
 export const defaults: ResolvedConfig = {
   environments: {},
@@ -63,16 +74,19 @@ const defaultEnvironments: Record<string, EnvironmentConfig> = {
   production: { color: "red", confirm: "type-name" },
 };
 
-export const configFiles = ["newenv.config.ts", "newenv.config.mjs", "newenv.config.js"];
+/**
+ * The section with the defaults filled in
+ */
+export function resolveConfig(section: EnvConfig | undefined, file?: string): ResolvedConfig {
+  return { ...defaults, ...section, file };
+}
 
-export async function loadConfig(cwd: string): Promise<ResolvedConfig> {
-  const file = configFiles.find((name) => existsSync(join(cwd, name)));
-  if (!file) {
-    return defaults;
-  }
-
-  const module = await import(pathToFileURL(join(cwd, file)).href);
-  return { ...defaults, ...(module.default as Config), file };
+/**
+ * The `env` section of the project's newcode.config.ts, found from cwd up, with the defaults
+ */
+export async function loadEnvConfig(cwd: string): Promise<ResolvedConfig> {
+  const { env: section, file } = await loadConfig({ cwd });
+  return resolveConfig(section, file);
 }
 
 export function environmentSettings(

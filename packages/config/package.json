@@ -1,0 +1,55 @@
+{
+  "name": "@newcode-team/config",
+  "version": "0.0.0",
+  "description": "Finds, loads and types newcode.config.ts, the shared config of the NewCode tools",
+  "type": "module",
+  "sideEffects": false,
+  "license": "MIT",
+  "author": "NewCode",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NewCodeDevelopment/tools.git",
+    "directory": "packages/config"
+  },
+  "homepage": "https://github.com/NewCodeDevelopment/tools/tree/main/packages/config#readme",
+  "bugs": "https://github.com/NewCodeDevelopment/tools/issues",
+  "keywords": [
+    "config",
+    "newcode"
+  ],
+  "scripts": {
+    "dev": "tsdown --config tsdown.config.ts --config-loader unrun --watch --no-clean",
+    "build": "tsdown --config tsdown.config.ts --config-loader unrun --no-clean",
+    "build:release": "tsdown --config tsdown.config.ts --config-loader unrun",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest",
+    "test:ci": "vitest run",
+    "clean": "rm -rf .turbo && rm -rf node_modules && rm -rf dist"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/core": "catalog:",
+    "@types/node": "catalog:",
+    "publint": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "unrun": "catalog:",
+    "vitest": "catalog:"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": "./dist/index.mjs",
+    "./package.json": "./package.json"
+  }
+}

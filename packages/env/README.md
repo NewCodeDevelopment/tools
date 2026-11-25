@@ -3,7 +3,7 @@
 Per-environment env files for any command, with switching and guards. Only reads files: no secrets service, no encryption, no syncing.
 
 ```bash
-pnpm add -D @newcode-team/env
+pnpm add -D @newcode-team/env @newcode-team/config
 ```
 
 ```json
@@ -39,7 +39,7 @@ Requires Node 24+.
 | `newenv <command> [args]` | Run with the selected environment |
 | `newenv use <name>` | Switch environment (`local` deletes `.envs/current`) |
 | `newenv status` | Active environment and its files, never values |
-| `newenv init` | Create `.envs/`, gitignore rules, `.envs/.env.local` and `newenv.config.ts` |
+| `newenv init` | Create `.envs/`, gitignore rules, `.envs/.env.local` and `newcode.config.ts` |
 | `newenv -- <command>` | Run a program named `use`, `status` or `init` |
 
 Options go before the command, and parsing stops at the first argument that isn't one: `newenv next dev --turbopack` passes `--turbopack` to Next.
@@ -81,10 +81,10 @@ pnpm newenv init
 Created .envs/
 Updated .gitignore
 Created .envs/.env.local from .envs/.env.example
-Created newenv.config.ts
+Created newcode.config.ts
 ```
 
-The example is the first of `.envs/.env.example`, `.example-env` and `.env.example`. Existing files are kept. No script or base key is guarded by default, so the config starts with `db:push`, `db:migrate`, `db:seed` and `DATABASE_URL` to edit. The gitignore rules:
+The example is the first of `.envs/.env.example`, `.example-env` and `.env.example`. Existing files are kept. No script or base key is guarded by default, so the `env` section starts with `db:push`, `db:migrate`, `db:seed` and `DATABASE_URL` to edit. An existing `newcode.config.ts` is never changed: without an `env` section, `init` prints the section to add. The gitignore rules:
 
 ```gitignore
 # newenv
@@ -130,20 +130,25 @@ Named imports work too: `import { loadEnvironment } from "@newcode-team/env"`.
 
 ## Config
 
-Optional. `newenv.config.ts`, `.mjs` or `.js` in the project root. `newenv init` creates one:
+Optional. The `env` section of `newcode.config.ts`, the config file all NewCode tools share. It's found by [`@newcode-team/config`](../config): the first `newcode.config.ts`, `.mjs` or `.js` from the current folder up to the git root. `newenv init` creates one:
 
 ```ts
-import { defineConfig } from "@newcode-team/env";
+import { defineConfig } from "@newcode-team/config";
+import { env } from "@newcode-team/env";
 
 export default defineConfig({
-  environments: {
-    staging: { color: "yellow", confirm: true },
-    production: { color: "red", confirm: "type-name" },
-  },
-  confirmScripts: ["db:push", "db:migrate", "db:seed"],
-  forbiddenInBase: ["DATABASE_URL"],
+  env: env({
+    environments: {
+      staging: { color: "yellow", confirm: true },
+      production: { color: "red", confirm: "type-name" },
+    },
+    confirmScripts: ["db:push", "db:migrate", "db:seed"],
+    forbiddenInBase: ["DATABASE_URL"],
+  }),
 });
 ```
+
+`env()` returns the section as is. Importing it types the section and adds the `env` key to the config, so a typo is an error. Without a file or an `env` section, every key has its default. `newenv.config.ts` from 0.1 is no longer read: move it into the `env` section.
 
 | Key | Default | Does |
 |---|---|---|
@@ -178,6 +183,8 @@ setopt PROMPT_SUBST
 ```
 
 ## Development
+
+Part of the [NewCode tools](../..) monorepo. From the repository root:
 
 ```bash
 pnpm build        # tsdown, with publint and attw

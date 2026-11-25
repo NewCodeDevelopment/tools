@@ -1,13 +1,17 @@
+import { join } from "node:path";
+import { type Config, defineConfig } from "@newcode-team/config";
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import * as newenv from "../src/index";
 import {
   confirmEnvironment,
   currentEnvironment,
+  env,
+  type EnvConfig,
   EnvironmentError,
   listEnvironments,
   loadEnvironment,
 } from "../src/index";
-import { fixture } from "./helpers";
+import { envConfig, fixture } from "./helpers";
 
 const files = {
   ".envs/.env": "SHARED=base\nOVERRIDE=base",
@@ -16,13 +20,24 @@ const files = {
   ".envs/.env.production": "OVERRIDE=production",
 };
 
-const config = (value: object) => ({
-  "newenv.config.mjs": `export default ${JSON.stringify(value)};\n`,
-});
-
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
+});
+
+describe("env", () => {
+  it("returns the section unchanged and adds env to Config", () => {
+    const section = { confirmScripts: ["db:migrate"], passthrough: ["VERCEL"] };
+    expect(env(section)).toBe(section);
+    expectTypeOf(env).returns.toEqualTypeOf<EnvConfig>();
+    expectTypeOf<Config["env"]>().toEqualTypeOf<EnvConfig | undefined>();
+
+    defineConfig({ env: env({ environments: { staging: { color: "blue", confirm: true } } }) });
+    // @ts-expect-error: a typo in the section name
+    defineConfig({ evn: {} });
+    // @ts-expect-error: an unknown key in the section
+    env({ confirmScript: [] });
+  });
 });
 
 describe("currentEnvironment", () => {
@@ -58,6 +73,7 @@ describe("loadEnvironment", () => {
     expect(newenv.loadEnvironment).toBe(loadEnvironment);
     expect(newenv.EnvironmentError).toBe(EnvironmentError);
     expect("default" in newenv).toBe(false);
+    expect("defineConfig" in newenv).toBe(false);
   });
 
   it("loads the current environment without a name", async () => {
@@ -117,10 +133,36 @@ describe("loadEnvironment", () => {
     expect(shell.SHARED).toBe("shell");
   });
 
+  it("reads the env section of a config in a parent folder", async () => {
+    const root = fixture({
+      ...envConfig({ environments: { staging: { color: "blue" } } }),
+      ...Object.fromEntries(Object.entries(files).map(([file, value]) => [`app/${file}`, value])),
+    });
+    expect((await loadEnvironment("staging", { cwd: join(root, "app") })).settings).toEqual({
+      color: "blue",
+      confirm: true,
+    });
+  });
+
+  it("uses the defaults without an env section", async () => {
+    const cwd = fixture({
+      ...files,
+      ".envs/.env": "DATABASE_URL=x",
+      "newcode.config.mjs": "export default { sync: {} };\n",
+    });
+    const staging = await loadEnvironment("staging", { cwd });
+    expect(staging.values.DATABASE_URL).toBe("postgres://staging");
+    expect(staging.settings).toEqual({ color: "yellow", confirm: true });
+    expect((await loadEnvironment("production", { cwd })).settings).toEqual({
+      color: "red",
+      confirm: "type-name",
+    });
+  });
+
   it("gives settings from the config, with the defaults", async () => {
     const cwd = fixture({
       ...files,
-      ...config({ environments: { staging: { color: "blue", confirm: "type-name" } } }),
+      ...envConfig({ environments: { staging: { color: "blue", confirm: "type-name" } } }),
     });
     expect((await loadEnvironment("staging", { cwd })).settings).toEqual({
       color: "blue",
@@ -161,7 +203,7 @@ describe("loadEnvironment", () => {
     const cwd = fixture({
       ...files,
       ".envs/.env": "DATABASE_URL=x",
-      ...config({ forbiddenInBase: ["DATABASE_URL"] }),
+      ...envConfig({ forbiddenInBase: ["DATABASE_URL"] }),
     });
     await expect(loadEnvironment("staging", { cwd })).rejects.toThrow(
       new EnvironmentError(
@@ -189,7 +231,10 @@ describe("loadEnvironment", () => {
   it("returns process.env with passthrough set and no name", async () => {
     vi.stubEnv("VERCEL", "1");
     vi.stubEnv("DATABASE_URL", "postgres://vercel");
-    const cwd = fixture({ ".envs/current": "production", ...config({ passthrough: ["VERCEL"] }) });
+    const cwd = fixture({
+      ".envs/current": "production",
+      ...envConfig({ passthrough: ["VERCEL"] }),
+    });
     const env = await loadEnvironment(undefined, { cwd });
 
     expect(env.name).toBe("production");
@@ -203,7 +248,7 @@ describe("loadEnvironment", () => {
 
   it("refuses a named environment with passthrough set", async () => {
     vi.stubEnv("VERCEL", "1");
-    const cwd = fixture({ ...files, ...config({ passthrough: ["VERCEL"] }) });
+    const cwd = fixture({ ...files, ...envConfig({ passthrough: ["VERCEL"] }) });
     await expect(loadEnvironment("staging", { cwd })).rejects.toThrow(
       new EnvironmentError("Can't load staging: VERCEL set, files ignored (passthrough)."),
     );
@@ -225,7 +270,10 @@ describe("confirmEnvironment", () => {
   });
 
   it("answers yes without asking for confirm: false", async () => {
-    const cwd = fixture({ ...files, ...config({ environments: { staging: { confirm: false } } }) });
+    const cwd = fixture({
+      ...files,
+      ...envConfig({ environments: { staging: { confirm: false } } }),
+    });
     expect(await confirmEnvironment("local", "Sync", { cwd })).toBe(true);
     expect(await confirmEnvironment("staging", "Sync", { cwd })).toBe(true);
   });

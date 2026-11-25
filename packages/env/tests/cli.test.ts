@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { fixture, printEnv, run, windows } from "./helpers";
+import { envConfig, fixture, linkPackages, printEnv, run, windows } from "./helpers";
 
 const files = {
   ".envs/.env": "SHARED=base\nSECRET=hunter2",
@@ -121,7 +121,7 @@ describe("run", () => {
   it("runs as is without files or checks when a passthrough variable is set", async () => {
     const cwd = fixture({
       ".env": "WHERE=root",
-      "newenv.config.mjs": `export default { passthrough: ["VERCEL"] };\n`,
+      ...envConfig({ passthrough: ["VERCEL"] }),
     });
     const result = await run(printEnv("WHERE"), cwd, { VERCEL: "1", WHERE: "vercel" });
     expect(result.code).toBe(0);
@@ -149,7 +149,7 @@ describe("run", () => {
       fixture({
         ...files,
         ".envs/.env": "DATABASE_URL=x",
-        "newenv.config.mjs": `export default { forbiddenInBase: ["DATABASE_URL"] };\n`,
+        ...envConfig({ forbiddenInBase: ["DATABASE_URL"] }),
       }),
     );
     expect(base.stderr).toMatch(/DATABASE_URL in the shared/);
@@ -165,7 +165,7 @@ describe("run", () => {
     const cwd = fixture({
       ...files,
       ".envs/current": "production",
-      "newenv.config.mjs": `export default { confirmScripts: ["db:push"] };\n`,
+      ...envConfig({ confirmScripts: ["db:push"] }),
     });
     const result = await run([process.execPath, "-e", "console.log('ran')"], cwd, {
       npm_lifecycle_event: "db:push",
@@ -242,27 +242,75 @@ describe("config", () => {
     expect(JSON.parse(result.stdout)).toEqual({ WHERE: "production" });
   });
 
-  it("loads newenv.config.ts", async () => {
+  it("loads the env section of newcode.config.ts", async () => {
     const cwd = fixture({
       ...files,
       ".envs/.env": "SHARED=base\nAPI_KEY=x",
-      "newenv.config.ts": `const config: { forbiddenInBase: string[] } = { forbiddenInBase: ["API_KEY"] };\nexport default config;\n`,
+      "newcode.config.ts": `const config: { env: { forbiddenInBase: string[] } } = { env: { forbiddenInBase: ["API_KEY"] } };\nexport default config;\n`,
     });
     expect((await run(["status"], cwd)).stdout).toMatch(
-      /Config +newenv\.config\.ts\nProblem +API_KEY in the shared/,
+      /Config +newcode\.config\.ts\nProblem +API_KEY in the shared/,
     );
   });
 
-  it("loads newenv.config.mjs", async () => {
+  it("loads the env section of newcode.config.mjs", async () => {
     const cwd = fixture({
       ...files,
       ".envs/current": "staging",
-      "newenv.config.mjs": `export default { confirmScripts: ["deploy"], passthrough: ["CI"] };\n`,
+      ...envConfig({ confirmScripts: ["deploy"], passthrough: ["CI"] }),
     });
     const deploy = await run(printEnv("WHERE"), cwd, { npm_lifecycle_event: "deploy" });
     expect(deploy.stderr).toMatch(/no TTY/);
     expect((await run(printEnv("WHERE"), cwd, { npm_lifecycle_event: "db:push" })).code).toBe(0);
     expect(JSON.parse((await run(printEnv("WHERE"), cwd, { CI: "1" })).stdout)).toEqual({});
+  });
+
+  it("loads the config init writes, with its imports", async () => {
+    const cwd = fixture({ ...files, ".envs/.env": "DATABASE_URL=x" });
+    linkPackages(cwd);
+    expect((await run(["init"], cwd)).code).toBe(0);
+    expect((await run(["status"], cwd)).stdout).toMatch(
+      /Config +newcode\.config\.ts\nProblem +DATABASE_URL in the shared/,
+    );
+  });
+
+  it("finds the config in a parent folder", async () => {
+    const root = fixture({
+      ...envConfig({ forbiddenInBase: ["API_KEY"] }),
+      ...Object.fromEntries(Object.entries(files).map(([file, value]) => [`app/${file}`, value])),
+      "app/.envs/.env": "API_KEY=x",
+    });
+    expect((await run(["status"], join(root, "app"))).stdout).toMatch(
+      /Config +\.\.[/\\]newcode\.config\.mjs\nProblem +API_KEY in the shared/,
+    );
+  });
+
+  it("uses the defaults without an env section", async () => {
+    const cwd = fixture({
+      ...files,
+      ".envs/.env": "DATABASE_URL=x",
+      ".envs/current": "production",
+      "newcode.config.mjs": "export default { sync: { database: false } };\n",
+    });
+    const result = await run(printEnv("WHERE"), cwd, { npm_lifecycle_event: "db:push" });
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({ WHERE: "production" });
+  });
+
+  it("ignores newenv.config.ts", async () => {
+    const cwd = fixture({
+      ...files,
+      ".envs/.env": "API_KEY=x",
+      "newenv.config.mjs": `export default { forbiddenInBase: ["API_KEY"] };\n`,
+    });
+    expect((await run(["status"], cwd)).stdout).not.toMatch(/Config|Problem/);
+  });
+
+  it("refuses a config file that fails to load", async () => {
+    const cwd = fixture({ ...files, "newcode.config.mjs": "export default {\n" });
+    const result = await run(["status"], cwd);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toMatch(/^newenv: Can't load .*newcode\.config\.mjs: /);
   });
 });
 
@@ -273,18 +321,23 @@ describe("init", () => {
       ".envs/.env.example": "A=example",
     });
     execFileSync("git", ["init", "-q"], { cwd });
+    // The second run loads the new config, which imports both packages
+    linkPackages(cwd);
 
     const first = await run(["init"], cwd);
     expect(first.code).toBe(0);
     expect(first.stdout).toBe(
-      "Exists  .envs/\nUpdated .gitignore\nCreated .envs/.env.local from .envs/.env.example\nCreated newenv.config.ts\n",
+      "Exists  .envs/\nUpdated .gitignore\nCreated .envs/.env.local from .envs/.env.example\nCreated newcode.config.ts\n",
     );
-    const config = readFileSync(join(cwd, "newenv.config.ts"), "utf8");
+    const config = readFileSync(join(cwd, "newcode.config.ts"), "utf8");
+    expect(config).toMatch(/^import \{ defineConfig \} from "@newcode-team\/config";\n/);
+    expect(config).toMatch(/import \{ env \} from "@newcode-team\/env";/);
+    expect(config).toMatch(/export default defineConfig\(\{\n {2}env: env\(\{/);
     expect(config).toMatch(/confirmScripts: \["db:push", "db:migrate", "db:seed"\]/);
     expect(config).toMatch(/forbiddenInBase: \["DATABASE_URL"\]/);
     expect(readFileSync(join(cwd, ".envs/.env.local"), "utf8")).toBe("A=example");
     expect((await run(["init"], cwd)).stdout).toBe(
-      "Exists  .envs/\nExists  .gitignore\nExists  .envs/.env.local\nExists  newenv.config.ts\n",
+      "Exists  .envs/\nExists  .gitignore\nExists  .envs/.env.local\nExists  newcode.config.ts\n",
     );
 
     [".envs/.env", ".envs/current", ".env", ".env.production.local"].forEach((file) => {
@@ -317,9 +370,21 @@ describe("init", () => {
     expect(readFileSync(join(cwd, ".envs/.env.local"), "utf8")).toBe("");
   });
 
-  it("keeps an existing config", async () => {
-    const cwd = fixture({ "newenv.config.mjs": "export default {};\n" });
-    expect((await run(["init"], cwd)).stdout).toMatch(/Exists {2}newenv\.config\.mjs\n$/);
-    expect(existsSync(join(cwd, "newenv.config.ts"))).toBe(false);
+  it("keeps an existing config with an env section", async () => {
+    const cwd = fixture(envConfig({}));
+    expect((await run(["init"], cwd)).stdout).toMatch(/Exists {2}newcode\.config\.mjs\n$/);
+    expect(existsSync(join(cwd, "newcode.config.ts"))).toBe(false);
+  });
+
+  it("prints the env section for an existing config without one, and changes nothing", async () => {
+    const content = "export default { sync: {} };\n";
+    const cwd = fixture({ "newcode.config.mjs": content });
+    const result = await run(["init"], cwd);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toMatch(
+      /Exists {2}newcode\.config\.mjs without an env section\. Add it:\n\nimport \{ env \} from "@newcode-team\/env";\n\n {2}env: env\(\{\n {4}confirmScripts: .*\n {4}forbiddenInBase: .*\n {2}\}\),\n$/,
+    );
+    expect(readFileSync(join(cwd, "newcode.config.mjs"), "utf8")).toBe(content);
+    expect(existsSync(join(cwd, "newcode.config.ts"))).toBe(false);
   });
 });

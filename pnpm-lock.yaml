@@ -250,6 +250,30 @@ importers:
         specifier: 'catalog:'
         version: 5.9.3
 
+  packages/config:
+    devDependencies:
+      '@arethetypeswrong/core':
+        specifier: 'catalog:'
+        version: 0.18.5
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.19.2
+      publint:
+        specifier: 'catalog:'
+        version: 0.3.25
+      tsdown:
+        specifier: 'catalog:'
+        version: 0.23.7(@arethetypeswrong/core@0.18.5)(publint@0.3.25)(typescript@5.9.3)(unrun@0.3.1)
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      unrun:
+        specifier: 'catalog:'
+        version: 0.3.1
+      vitest:
+        specifier: 'catalog:'
+        version: 5.1.1(@types/node@24.19.2)(vite@8.3.8(@types/node@24.19.2)(yaml@2.9.1))
+
   packages/env:
     dependencies:
       '@inquirer/confirm':
@@ -274,6 +298,9 @@ importers:
       '@arethetypeswrong/core':
         specifier: 'catalog:'
         version: 0.18.5
+      '@newcode-team/config':
+        specifier: workspace:*
+        version: link:../config
       '@types/cross-spawn':
         specifier: ^6.0.6
         version: 6.0.6
