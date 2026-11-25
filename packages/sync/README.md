@@ -59,6 +59,7 @@ Every failure or abort exits with 1. Ctrl+C on a prompt aborts.
 - The migration history comes along when its table lives in a synced schema, so no migrate run is needed afterwards. Drizzle keeps it in `drizzle`: add that schema.
 - The dump goes to a temporary folder that is always removed, also after Ctrl+C.
 - Passwords reach `pg_dump` and `psql` through `PGPASSWORD`, never as process arguments.
+- A URL with `sslmode=verify-full` and no root certificate, in the URL, in `PGSSLROOTCERT` or at `~/.postgresql/root.crt`, is verified against the system's trusted roots (`sslrootcert=system`, libpq 16 or later), like Node's `pg` does. So hosted Postgres such as PlanetScale or Neon needs no certificate file, and only that side changes.
 
 Doesn't copy roles, extensions or other schemas, and doesn't touch the source.
 

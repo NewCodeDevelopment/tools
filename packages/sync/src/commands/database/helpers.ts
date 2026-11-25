@@ -1,5 +1,5 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { devNull, tmpdir } from "node:os";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { devNull, homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadEnvironment } from "@newcode-team/env";
 import type { DatabaseConfig } from "../../lib/config";
@@ -90,6 +90,32 @@ const libpqVariables = [
 ];
 
 /**
+ * Where libpq looks for a root certificate when neither the URL nor PGSSLROOTCERT names one
+ */
+export function defaultRootCertificate(): string {
+  return process.platform === "win32"
+    ? join(process.env.APPDATA ?? homedir(), "postgresql", "root.crt")
+    : join(homedir(), ".postgresql", "root.crt");
+}
+
+/**
+ * Whether libpq should check the server against the system's trusted roots. With
+ * `sslmode=verify-full` libpq wants a root certificate file and fails without one, while hosted
+ * Postgres, such as PlanetScale or Neon, uses public certificates that the system's roots verify,
+ * as Node's `pg` does. A root certificate the user set up, in the URL, in PGSSLROOTCERT or at
+ * libpq's default path, is left alone
+ */
+export function useSystemRoots(url: URL, env: NodeJS.ProcessEnv): boolean {
+  const mode = url.searchParams.get("sslmode") ?? env.PGSSLMODE;
+  return (
+    mode === "verify-full" &&
+    !url.searchParams.has("sslrootcert") &&
+    !env.PGSSLROOTCERT &&
+    !existsSync(defaultRootCertificate())
+  );
+}
+
+/**
  * The URL to pass to pg_dump and psql, and the environment to run them with. The password goes
  * through PGPASSWORD, so it's never a process argument that `ps` shows
  */
@@ -104,6 +130,11 @@ export function connection(url: URL): { dbname: string; env: NodeJS.ProcessEnv }
   const env = Object.fromEntries(
     Object.entries(process.env).filter(([key]) => !libpqVariables.includes(key)),
   );
+  // In this side's URL only: PGSSLROOTCERT=system would make every side require SSL, also a local
+  // Postgres without it. Needs libpq 16 or later
+  if (useSystemRoots(url, env)) {
+    withoutPassword.searchParams.set("sslrootcert", "system");
+  }
   return {
     dbname: withoutPassword.href,
     env: password === undefined ? env : { ...env, PGPASSWORD: password },

@@ -1,8 +1,12 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { EnvironmentError } from "@newcode-team/env";
 import { describe, expect, it } from "vitest";
 import {
   connection,
   type Database,
+  defaultRootCertificate,
   describeDatabase,
   resolveDatabase,
   sameDatabase,
@@ -141,6 +145,76 @@ describe("databases", () => {
       delete process.env.PGPASSWORD;
       delete process.env.PGHOST;
     }
+  });
+
+  describe("root certificates", () => {
+    const keys = ["HOME", "USERPROFILE", "APPDATA", "PGSSLMODE", "PGSSLROOTCERT"] as const;
+
+    // A home folder without libpq's default root.crt, unless the test adds one
+    function withHome(test: (home: string) => void) {
+      const saved = keys.map((key) => [key, process.env[key]] as const);
+      const home = mkdtempSync(join(tmpdir(), "newsync-home-"));
+      process.env.HOME = home;
+      process.env.USERPROFILE = home;
+      process.env.APPDATA = home;
+      delete process.env.PGSSLMODE;
+      delete process.env.PGSSLROOTCERT;
+      try {
+        test(home);
+      } finally {
+        for (const [key, value] of saved) {
+          if (value === undefined) {
+            delete process.env[key];
+          } else {
+            process.env[key] = value;
+          }
+        }
+        rmSync(home, { recursive: true, force: true });
+      }
+    }
+
+    const dbname = (url: string) => connection(new URL(url)).dbname;
+
+    it("verifies sslmode=verify-full against the system's roots without a root certificate", () => {
+      withHome(() => {
+        expect(dbname("postgres://app:secret@db.example.com/app?sslmode=verify-full")).toBe(
+          "postgres://app@db.example.com/app?sslmode=verify-full&sslrootcert=system",
+        );
+        process.env.PGSSLMODE = "verify-full";
+        expect(dbname("postgres://app@db.example.com/app")).toBe(
+          "postgres://app@db.example.com/app?sslrootcert=system",
+        );
+      });
+    });
+
+    it("leaves other SSL modes alone, so a local Postgres without SSL still connects", () => {
+      withHome(() => {
+        for (const url of [
+          "postgres://postgres@localhost:1112/postgres",
+          "postgres://app@db.example.com/app?sslmode=require",
+          "postgres://app@db.example.com/app?sslmode=verify-ca",
+        ]) {
+          expect(dbname(url)).toBe(url);
+        }
+      });
+    });
+
+    it("leaves a root certificate the user set up alone", () => {
+      withHome((home) => {
+        const url = "postgres://app@db.example.com/app?sslmode=verify-full";
+        const own = `${url}&sslrootcert=%2Fcerts%2Froot.crt`;
+        expect(dbname(own)).toBe(own);
+
+        process.env.PGSSLROOTCERT = "/certs/root.crt";
+        expect(dbname(url)).toBe(url);
+        delete process.env.PGSSLROOTCERT;
+
+        mkdirSync(dirname(defaultRootCertificate()), { recursive: true });
+        writeFileSync(defaultRootCertificate(), "");
+        expect(defaultRootCertificate().startsWith(home)).toBe(true);
+        expect(dbname(url)).toBe(url);
+      });
+    });
   });
 
   it("finds the same database by host, port and name", () => {
