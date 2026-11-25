@@ -208,12 +208,12 @@ describe("status", () => {
   });
 
   it("shows the passthrough variables that are set", async () => {
-    const cwd = fixture({ ...files, ...envConfig({ passthrough: ["VERCEL", "CI"] }) });
+    const cwd = fixture({ ...files, ...envConfig({ passthrough: ["NEWENV_TEST_HOST", "NEWENV_TEST_OTHER"] }) });
     expect((await newenv(["status"], cwd)).stdout).not.toMatch(/Passthrough/);
 
-    vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("NEWENV_TEST_HOST", "1");
     expect((await newenv(["status"], cwd)).stdout).toMatch(
-      /^Passthrough {2}VERCEL set, files ignored$/m,
+      /^Passthrough {2}NEWENV_TEST_HOST set, files ignored$/m,
     );
   });
 
