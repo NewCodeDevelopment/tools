@@ -1,0 +1,95 @@
+# Local services for the playground, standing in for three environments: a database and a bucket
+# each for local, staging and production. Production and staging start with seed data to sync.
+#   pnpm services:start   start, and wait until the buckets exist
+#   pnpm services:stop    stop, keeping all data
+#   pnpm services:reset   delete all data and start fresh with the seed data
+name: newcode-playground
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-1113}:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    configs:
+      - source: postgres-init
+        target: /docker-entrypoint-initdb.d/init.sql
+    volumes:
+      # Postgres 18 images keep their data under /var/lib/postgresql/<major>
+      - postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  storage:
+    image: rustfs/rustfs:1.0.6
+    ports:
+      - "127.0.0.1:${STORAGE_PORT:-9020}:9000"
+      - "127.0.0.1:${STORAGE_CONSOLE_PORT:-9021}:9001"
+    environment:
+      RUSTFS_ACCESS_KEY: playground
+      RUSTFS_SECRET_KEY: playground-dev
+      RUSTFS_CONSOLE_ENABLE: "true"
+      # Virtual-hosted-style requests (bucket.localhost:9000), as the S3 SDK sends them by default
+      RUSTFS_SERVER_DOMAINS: localhost
+      # Logs to stdout instead of a file in the container
+      RUSTFS_OBS_LOG_DIRECTORY: ""
+    volumes:
+      - storage:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/health/ready"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # Creates the buckets and the seed files once storage is up, then exits
+  storage-init:
+    image: amazon/aws-cli:2.40.4
+    depends_on:
+      storage:
+        condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID: playground
+      AWS_SECRET_ACCESS_KEY: playground-dev
+      AWS_DEFAULT_REGION: auto
+      AWS_ENDPOINT_URL: http://storage:9000
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        set -e
+        aws configure set default.s3.addressing_style path
+        for env in local staging production; do
+          aws s3api head-bucket --bucket "playground-$$env" 2>/dev/null || {
+            aws s3api create-bucket --bucket "playground-$$env"
+            [ "$$env" = local ] || echo "hello from $$env" | aws s3 cp - "s3://playground-$$env/hello.txt"
+          }
+        done
+        aws s3api head-object --bucket playground-production --key images/logo.txt >/dev/null 2>&1 ||
+          echo "a production-only file" | aws s3 cp - s3://playground-production/images/logo.txt
+
+configs:
+  # Runs once, on the first start with an empty volume
+  postgres-init:
+    content: |
+      CREATE DATABASE playground_local;
+      CREATE DATABASE playground_staging;
+      CREATE DATABASE playground_production;
+
+      \connect playground_staging
+      CREATE TABLE posts (id serial PRIMARY KEY, title text NOT NULL);
+      INSERT INTO posts (title) VALUES ('Staging post');
+
+      \connect playground_production
+      CREATE TABLE posts (id serial PRIMARY KEY, title text NOT NULL);
+      INSERT INTO posts (title) VALUES ('First post'), ('Second post'), ('Third post');
+      CREATE TABLE users (id serial PRIMARY KEY, email text NOT NULL);
+      INSERT INTO users (email) VALUES ('ada@example.com'), ('alan@example.com');
+
+volumes:
+  postgres:
+  storage:
