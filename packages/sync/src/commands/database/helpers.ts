@@ -146,6 +146,14 @@ export async function checkVersion(source: Database): Promise<void> {
 }
 
 /**
+ * A row estimate for the dry run, e.g. `~1 row`
+ */
+export function describeRowEstimate(estimate: string): string {
+  const count = estimate === "" ? -1 : Number(estimate);
+  return count < 0 ? "row count unknown" : `~${count} ${count === 1 ? "row" : "rows"}`;
+}
+
+/**
  * Lists the target's tables in the schemas, with row estimates. Changes nothing. Schema names are
  * plain identifiers (see lib/config.ts), so they need no escaping
  */
@@ -154,17 +162,18 @@ export async function listTables(
   schemas: string[],
   log: (message: string) => void,
 ): Promise<void> {
+  // reltuples stays -1 until a table is analyzed, as after a restore. The statistics' live row
+  // count is kept up to date on every write, and costs no count(*) on a large table
   const rows = await query(
     target.url,
-    `SELECT n.nspname || '.' || c.relname, c.reltuples::bigint FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind IN ('r', 'p') AND NOT c.relispartition AND n.nspname IN (${schemas.map((schema) => `'${schema}'`).join(", ")}) ORDER BY 1`,
+    `SELECT n.nspname || '.' || c.relname, CASE WHEN c.reltuples >= 0 THEN c.reltuples::bigint ELSE s.n_live_tup END FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace LEFT JOIN pg_stat_user_tables s ON s.relid = c.oid WHERE c.relkind IN ('r', 'p') AND NOT c.relispartition AND n.nspname IN (${schemas.map((schema) => `'${schema}'`).join(", ")}) ORDER BY 1`,
   );
   const tables = rows
     .split("\n")
     .filter((line) => line.trim() !== "")
     .map((line) => {
-      const [name = "", estimate = "-1"] = line.split("\t");
-      const count = Number(estimate);
-      return `  ${name}  ${count < 0 ? "row count unknown" : `~${count} rows`}`;
+      const [name = "", estimate = ""] = line.split("\t");
+      return `  ${name}  ${describeRowEstimate(estimate)}`;
     });
   log(
     tables.length > 0
@@ -245,8 +254,10 @@ export async function copyDatabase(
       ],
       to.env,
     );
+    // Migration history comes along only when its table is in one of the schemas
+    const one = schemas.length === 1;
     log(
-      `Done. ${describeDatabase(target)} now has the schema, data and migration history of the source.`,
+      `Done. ${one ? "Schema" : "Schemas"} ${schemas.join(", ")} of ${describeDatabase(target)} now ${one ? "matches" : "match"} the source.`,
     );
   } finally {
     process.off("SIGINT", interrupt);

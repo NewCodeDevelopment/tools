@@ -42,6 +42,12 @@ export async function chooseSide(
     if (!available.includes(given)) {
       throw new SyncError(`Unknown environment "${given}". Available: ${available.join(", ")}`);
     }
+    // Checked here: a prompt on a closed stdin never settles, and Node exits with a warning
+    if (given === CUSTOM && !streams.input.isTTY) {
+      throw new SyncError(
+        `${side} ${CUSTOM} asks for the connection details: needs a terminal. In a script, pass a custom side to syncDatabase or syncS3.`,
+      );
+    }
     return given;
   }
   if (!streams.input.isTTY) {

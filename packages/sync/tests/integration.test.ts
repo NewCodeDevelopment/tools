@@ -241,6 +241,9 @@ describe.skipIf(reason !== undefined)("integration", { timeout: 60_000 }, () => 
       );
       expect(tables(databases.staging)).toBe("users");
       expect(tables(databases.production)).toBe("users");
+      expect(result.stdout).toMatch(
+        `Done. Schema public of staging (127.0.0.1:${postgresPort}/${databases.staging}) now matches the source.`,
+      );
       expectNoSecrets(result);
     });
 
@@ -262,13 +265,13 @@ describe.skipIf(reason !== undefined)("integration", { timeout: 60_000 }, () => 
 
     it("lists the tables it would replace with --dry-run, and changes nothing", async () => {
       seedSource(databases.production);
+      // Not analyzed, as after a restore: the counts come from the statistics, not reltuples
       seedTarget(databases.staging);
-      sql(databases.staging, "ANALYZE");
 
       const result = await run(["db", "production", "staging", "--dry-run"], project());
       expect(result.code, result.stderr).toBe(0);
-      expect(result.stdout).toMatch(/public\.only_in_target +~1 rows/);
-      expect(result.stdout).toMatch(/public\.users +~1 rows/);
+      expect(result.stdout).toMatch(/public\.only_in_target +~1 row$/m);
+      expect(result.stdout).toMatch(/public\.users +~1 row$/m);
       expect(result.stdout).toMatch(/Dry run: nothing changed\./);
       expect(tables(databases.staging)).toBe("only_in_target,users");
       expect(sql(databases.staging, "SELECT name FROM users")).toBe("Old");
@@ -283,6 +286,14 @@ describe.skipIf(reason !== undefined)("integration", { timeout: 60_000 }, () => 
       expect(result.code).toBe(1);
       expect(result.stderr).toMatch(/needs confirmation, no TTY\. Aborted\./);
       expect(tables(databases.staging)).toBe("only_in_target,users");
+    });
+
+    it("refuses a custom side without a terminal, before prompting", async () => {
+      const result = await run(["db", "custom", "staging"], project());
+      expect(result.code).toBe(1);
+      expect(result.stderr).toBe(
+        "newsync: Source custom asks for the connection details: needs a terminal. In a script, pass a custom side to syncDatabase or syncS3.\n",
+      );
     });
 
     it("refuses the same database", async () => {
