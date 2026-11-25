@@ -4,6 +4,7 @@ packages:
 catalog:
   "@arethetypeswrong/core": "^0.18.5"
   "@types/node": "^24.19.2"
+  "@vitest/coverage-v8": "^5.1.0"
   publint: "^0.3.25"
   tsdown: "^0.23.7"
   typescript: "5.9.3"

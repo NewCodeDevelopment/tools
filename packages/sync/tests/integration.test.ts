@@ -2,6 +2,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { SyncError, syncDatabase, syncS3 } from "../src/index";
 import { config, envFile, fixture, type Result, run } from "./helpers";
 
 // The services of compose.yaml at the repository root
@@ -30,6 +31,10 @@ function unavailable(): string | undefined {
 }
 
 const reason = unavailable();
+// CI sets this where the services run, so a broken setup fails instead of skipping every test
+if (reason && process.env.NEWSYNC_REQUIRE_INTEGRATION) {
+  throw new Error(`NEWSYNC_REQUIRE_INTEGRATION is set, but ${reason}.`);
+}
 if (reason) {
   console.warn(`Skipping the newsync integration tests: ${reason}.`);
 }
@@ -128,7 +133,24 @@ describe.skipIf(reason !== undefined)("integration", { timeout: 60_000 }, () => 
    * A project whose environments point at the test databases and buckets. local reaches storage
    * through localhost, so its endpoint differs and it gets its own rclone remote
    */
-  function project(env: object = {}, sections: object = {}) {
+  const values = (name: Name) => ({
+    DATABASE_URL: `postgres://postgres:${dbPassword}@127.0.0.1:${postgresPort}/${databases[name]}`,
+    S3_ENDPOINT: `http://${name === "local" ? "localhost" : "127.0.0.1"}:${storagePort}`,
+    S3_ACCESS_KEY_ID: s3Key,
+    S3_SECRET_ACCESS_KEY: s3Secret,
+    S3_BUCKET: `newsync-${name}`,
+  });
+
+  /**
+   * A project whose environments point at the test databases and buckets. local reaches storage
+   * through localhost, so its endpoint differs and it gets its own rclone remote. `changed` holds
+   * other values per environment
+   */
+  function project(
+    env: object = {},
+    sections: object = {},
+    changed: Partial<Record<Name, Record<string, string>>> = {},
+  ) {
     return fixture({
       ...config({
         env: {
@@ -140,17 +162,30 @@ describe.skipIf(reason !== undefined)("integration", { timeout: 60_000 }, () => 
       ...Object.fromEntries(
         environments.map((name) => [
           `.envs/.env.${name}`,
-          envFile({
-            DATABASE_URL: `postgres://postgres:${dbPassword}@127.0.0.1:${postgresPort}/${databases[name]}`,
-            S3_ENDPOINT: `http://${name === "local" ? "localhost" : "127.0.0.1"}:${storagePort}`,
-            S3_ACCESS_KEY_ID: s3Key,
-            S3_SECRET_ACCESS_KEY: s3Secret,
-            S3_BUCKET: `newsync-${name}`,
-          }),
+          envFile({ ...values(name), ...changed[name] }),
         ]),
       ),
     });
   }
+
+  /**
+   * The schema of public as pg_dump writes it, without comments and its per-run markers
+   */
+  const schemaOf = (database: string) =>
+    execFileSync(
+      "pg_dump",
+      ["--schema-only", "--no-owner", "--no-privileges", "--schema=public", adminUrl(database)],
+      { env: adminEnv, encoding: "utf8" },
+    )
+      .split("\n")
+      .filter(
+        (line) =>
+          line !== "" &&
+          !line.startsWith("--") &&
+          !line.startsWith("\\") &&
+          !line.includes("pg_attver="),
+      )
+      .join("\n");
 
   const expectNoSecrets = ({ stdout, stderr }: Result) => {
     expect(stdout + stderr).not.toContain(dbPassword);
@@ -311,6 +346,356 @@ describe.skipIf(reason !== undefined)("integration", { timeout: 60_000 }, () => 
         `newsync: Source and target are the same database: staging (127.0.0.1:${postgresPort}/${databases.local}).`,
       );
       expectNoSecrets(result);
+    });
+  });
+
+  describe("s3 edge cases", () => {
+    it("copies nested folders and names with spaces and other scripts", async () => {
+      const files = {
+        "deep/er/est/file.txt": "deep",
+        "with space/my file (1).txt": "space",
+        "ünï/çødé-日本.txt": "unicode",
+      };
+      fillBucket("newsync-production", files);
+      fillBucket("newsync-local", {});
+
+      const result = await run(["s3", "production", "local"], project());
+      expect(result.code, result.stderr).toBe(0);
+      expect(listBucket("newsync-local")).toEqual(Object.keys(files).toSorted());
+      expect(rclone("cat", "test:newsync-local/with space/my file (1).txt")).toBe("space");
+      expect(rclone("cat", "test:newsync-local/ünï/çødé-日本.txt")).toBe("unicode");
+    });
+
+    it("skips files that are already the same", async () => {
+      fillBucket("newsync-production", { "same.txt": "same", "other.txt": "other" });
+      fillBucket("newsync-local", {});
+      expect((await run(["s3", "production", "local"], project())).code).toBe(0);
+
+      rclone("rcat", "test:newsync-production/new.txt");
+      const again = await run(["s3", "production", "local", "--dry-run"], project());
+      expect(again.code, again.stderr).toBe(0);
+      expect(again.stderr).toMatch(/new\.txt/);
+      expect(again.stderr).not.toMatch(/same\.txt|other\.txt/);
+    });
+
+    it("empties the target for an empty source", async () => {
+      fillBucket("newsync-production", {});
+      fillBucket("newsync-staging", { "a.txt": "a", "b/c.txt": "c" });
+
+      const result = await run(["s3", "production", "staging"], project());
+      expect(result.code, result.stderr).toBe(0);
+      expect(listBucket("newsync-staging")).toEqual([]);
+    });
+
+    it("fails on a wrong key without changing the target or printing a key", async () => {
+      fillBucket("newsync-production", { "new.txt": "new" });
+      fillBucket("newsync-staging", { "keep.txt": "keep" });
+
+      const wrong = "wrong-hidden-key-value";
+      const cwd = project({}, {}, { staging: { S3_SECRET_ACCESS_KEY: wrong } });
+      const result = await run(["s3", "production", "staging"], cwd);
+      expect(result.code).toBe(1);
+      expect(result.stderr).toMatch(/newsync: rclone failed\.\n$/);
+      expect(result.stdout).not.toMatch(/Done/);
+      expect(result.stdout + result.stderr).not.toContain(wrong);
+      expectNoSecrets(result);
+      expect(listBucket("newsync-staging")).toEqual(["keep.txt"]);
+    });
+
+    it("fails on a bucket that doesn't exist, leaving the source alone", async () => {
+      fillBucket("newsync-production", { "a.txt": "a" });
+      const cwd = project({}, {}, { staging: { S3_BUCKET: "newsync-no-such-bucket" } });
+      const result = await run(["s3", "production", "staging"], cwd);
+      expect(result.code).toBe(1);
+      expect(result.stderr).toMatch(/newsync: rclone failed\.\n$/);
+      expect(listBucket("newsync-production")).toEqual(["a.txt"]);
+    });
+  });
+
+  describe("db edge cases", () => {
+    it("keeps keys, sequences, types, indexes and views working in the copy", async () => {
+      sql(
+        databases.production,
+        `CREATE TYPE mood AS ENUM ('ok', 'bad');
+         CREATE TABLE authors (id serial PRIMARY KEY, name text NOT NULL UNIQUE);
+         CREATE TABLE posts (
+           id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+           author_id int NOT NULL REFERENCES authors (id) ON DELETE CASCADE,
+           mood mood NOT NULL DEFAULT 'ok',
+           title text
+         );
+         CREATE INDEX posts_title ON posts (title);
+         CREATE VIEW post_titles AS
+           SELECT p.title, a.name FROM posts p JOIN authors a ON a.id = p.author_id;
+         INSERT INTO authors (name) VALUES ('Ada'), ('Linus');
+         INSERT INTO posts (author_id, title) VALUES (1, 'One'), (2, 'Two'), (2, 'Three');`,
+      );
+      seedTarget(databases.staging);
+
+      const result = await run(["db", "production", "staging"], project());
+      expect(result.code, result.stderr).toBe(0);
+
+      expect(schemaOf(databases.staging)).toBe(schemaOf(databases.production));
+      expect(
+        sql(databases.staging, "SELECT string_agg(title, ',' ORDER BY title) FROM post_titles"),
+      ).toBe("One,Three,Two");
+      // The sequences continue where the source's are
+      expect(sql(databases.staging, "INSERT INTO authors (name) VALUES ('New') RETURNING id")).toBe(
+        "3",
+      );
+      expect(
+        sql(databases.staging, "INSERT INTO posts (author_id) VALUES (3) RETURNING id, mood"),
+      ).toBe("4|ok");
+      expect(() => sql(databases.staging, "INSERT INTO posts (author_id) VALUES (99)")).toThrow();
+      // And the source is as it was
+      expect(sql(databases.production, "SELECT count(*) FROM authors")).toBe("2");
+    });
+
+    it("copies every row of a larger table", async () => {
+      const fill =
+        "CREATE TABLE big (id int PRIMARY KEY, v text, n numeric, at timestamptz, j jsonb); INSERT INTO big SELECT g, md5(g::text), g / 7.0, timestamptz '2026-01-01' + g * interval '1 minute', jsonb_build_object('g', g, 'text', E'tab\\there \"quoted\" ünï') FROM generate_series(1, 20000) g;";
+      const sum =
+        "SELECT count(*), md5(string_agg(id || v || n || at || j, '' ORDER BY id)) FROM big";
+      sql(databases.production, fill);
+
+      const result = await run(["db", "production", "local"], project());
+      expect(result.code, result.stderr).toBe(0);
+      expect(sql(databases.local, sum)).toBe(sql(databases.production, sum));
+      expect(sql(databases.local, "SELECT count(*) FROM big")).toBe("20000");
+    });
+
+    it("replaces only the configured schemas", async () => {
+      sql(
+        databases.production,
+        "CREATE TABLE users (id int); CREATE SCHEMA drizzle; CREATE TABLE drizzle.migrations (hash text); INSERT INTO drizzle.migrations VALUES ('abc'); CREATE SCHEMA other; CREATE TABLE other.not_copied (id int);",
+      );
+      sql(
+        databases.staging,
+        "CREATE SCHEMA drizzle; CREATE TABLE drizzle.stale (id int); CREATE SCHEMA other; CREATE TABLE other.kept (id int); INSERT INTO other.kept VALUES (7);",
+      );
+      const all =
+        "SELECT string_agg(schemaname || '.' || tablename, ',' ORDER BY schemaname, tablename) FROM pg_tables WHERE schemaname IN ('public', 'drizzle', 'other')";
+
+      const cwd = project({}, { sync: { database: { schemas: ["public", "drizzle"] } } });
+      const result = await run(["db", "production", "staging"], cwd);
+      expect(result.code, result.stderr).toBe(0);
+      expect(result.stdout).toMatch(/Done\. Schemas public, drizzle of staging .* now match/);
+      expect(sql(databases.staging, all)).toBe("drizzle.migrations,other.kept,public.users");
+      expect(sql(databases.staging, "SELECT hash FROM drizzle.migrations")).toBe("abc");
+      expect(sql(databases.staging, "SELECT id FROM other.kept")).toBe("7");
+
+      const dry = await run(["db", "production", "staging", "--dry-run"], cwd);
+      expect(dry.stdout).toMatch(/drizzle\.migrations +~1 row$/m);
+      expect(dry.stdout).toMatch(/public\.users +~0 rows$/m);
+      expect(dry.stdout).not.toMatch(/other\.kept/);
+    });
+
+    it("empties the target's schema for a source without tables", async () => {
+      seedTarget(databases.staging);
+
+      const result = await run(["db", "production", "staging"], project());
+      expect(result.code, result.stderr).toBe(0);
+      expect(tables(databases.staging)).toBe("");
+      // The schema itself is back, ready for a migration
+      expect(sql(databases.staging, "CREATE TABLE fresh (id int); SELECT 'ok'")).toBe("ok");
+
+      const dry = await run(["db", "production", "local", "--dry-run"], project());
+      expect(dry.stdout).toMatch(/No tables in public of local \(.*\) yet\./);
+    });
+
+    it("connects with a password full of URL characters, through the configured variable", async () => {
+      const password = "p@ss/w:rd#1?&=%";
+      const role = `newsync_odd_${randomBytes(4).toString("hex")}`;
+      sql("postgres", `CREATE ROLE ${role} LOGIN SUPERUSER PASSWORD '${password}'`);
+      seedSource(databases.production);
+      seedTarget(databases.staging);
+      const url = (name: Name) =>
+        `postgresql://${role}:${encodeURIComponent(password)}@127.0.0.1:${postgresPort}/${databases[name]}`;
+
+      try {
+        const cwd = project(
+          {},
+          { sync: { database: { url: "POSTGRES_URL" } } },
+          {
+            production: { POSTGRES_URL: url("production"), DATABASE_URL: "" },
+            staging: { POSTGRES_URL: url("staging"), DATABASE_URL: "" },
+          },
+        );
+        const result = await run(["db", "production", "staging"], cwd);
+        expect(result.code, result.stderr).toBe(0);
+        expect(tables(databases.staging)).toBe("users");
+        expect(result.stdout + result.stderr).not.toContain(password);
+        expect(result.stdout + result.stderr).not.toContain(encodeURIComponent(password));
+      } finally {
+        // The restored tables are the role's
+        sql(databases.staging, `REASSIGN OWNED BY ${role} TO postgres`);
+        sql("postgres", `DROP ROLE ${role}`);
+      }
+    });
+
+    it("fails on a wrong password without changing the target or printing it", async () => {
+      seedSource(databases.production);
+      seedTarget(databases.staging);
+      const wrong = "wrong-hidden-password";
+      const cwd = project(
+        {},
+        {},
+        {
+          staging: {
+            DATABASE_URL: `postgres://postgres:${wrong}@127.0.0.1:${postgresPort}/${databases.staging}`,
+          },
+        },
+      );
+
+      const result = await run(["db", "production", "staging"], cwd);
+      expect(result.code).toBe(1);
+      expect(result.stderr).toMatch(/newsync: psql failed\.\n$/);
+      expect(result.stdout + result.stderr).not.toContain(wrong);
+      expectNoSecrets(result);
+      expect(tables(databases.staging)).toBe("only_in_target,users");
+    });
+
+    it("fails on a source that can't be reached, before touching the target", async () => {
+      seedTarget(databases.staging);
+      const cwd = project(
+        {},
+        {},
+        {
+          production: {
+            DATABASE_URL: `postgres://postgres:${dbPassword}@127.0.0.1:${postgresPort}/newsync_no_such_database`,
+          },
+        },
+      );
+      const result = await run(["db", "production", "staging"], cwd);
+      expect(result.code).toBe(1);
+      expect(result.stderr).toMatch(/newsync: psql failed\.\n$/);
+      expect(result.stdout).toBe("");
+      expect(tables(databases.staging)).toBe("only_in_target,users");
+      expectNoSecrets(result);
+    });
+
+    it("guards production as a target by default, and leaves it unchanged", async () => {
+      seedSource(databases.staging);
+      seedTarget(databases.production);
+
+      // Without the environments of project(): the defaults of newenv
+      const result = await run(["db", "staging", "production"], project({ environments: {} }));
+      expect(result.code).toBe(1);
+      expect(result.stderr).toMatch(/Replace schema public of production .*no TTY\. Aborted\./);
+      expect(tables(databases.production)).toBe("only_in_target,users");
+      expect(sql(databases.production, "SELECT name FROM users")).toBe("Old");
+    });
+  });
+
+  describe("script API", () => {
+    it("syncDatabase copies between environments, a custom URL and back, without asking", async () => {
+      seedSource(databases.production);
+      seedTarget(databases.staging);
+      const cwd = project({ environments: {} });
+      const log: string[] = [];
+      const options = { cwd, log: (message: string) => log.push(message) };
+
+      await syncDatabase({ source: "production", target: "staging", ...options });
+      expect(tables(databases.staging)).toBe("users");
+
+      // A custom side on each end. production is the target: the API doesn't ask
+      sql(databases.staging, "INSERT INTO users VALUES (3, 'Grace')");
+      await syncDatabase({
+        source: "staging",
+        target: { url: values("local").DATABASE_URL },
+        ...options,
+      });
+      await syncDatabase({
+        source: { url: values("local").DATABASE_URL },
+        target: "production",
+        ...options,
+      });
+      expect(sql(databases.production, "SELECT string_agg(name, ',' ORDER BY id) FROM users")).toBe(
+        "Ada,Linus,Grace",
+      );
+
+      expect(log.join("\n")).toMatch(
+        `Restoring into custom (127.0.0.1:${postgresPort}/${databases.local})...`,
+      );
+      expect(log.join("\n")).not.toContain(dbPassword);
+    });
+
+    it("syncDatabase with dryRun lists and changes nothing", async () => {
+      seedSource(databases.production);
+      seedTarget(databases.staging);
+      const log: string[] = [];
+      await syncDatabase({
+        source: "production",
+        target: "staging",
+        dryRun: true,
+        cwd: project(),
+        log: (message) => log.push(message),
+      });
+      expect(log.join("\n")).toMatch(/public\.users {2}~1 row\n?/);
+      expect(log.at(-1)).toBe("Dry run: nothing changed.");
+      expect(tables(databases.staging)).toBe("only_in_target,users");
+    });
+
+    it("syncDatabase throws a SyncError and leaves the target when the restore fails", async () => {
+      sql(
+        databases.production,
+        "CREATE SCHEMA other; CREATE DOMAIN other.positive AS int CHECK (VALUE > 0); CREATE TABLE items (n other.positive);",
+      );
+      seedTarget(databases.staging);
+      await expect(
+        syncDatabase({ source: "production", target: "staging", cwd: project(), log: () => {} }),
+      ).rejects.toThrow(new SyncError("psql failed."));
+      expect(tables(databases.staging)).toBe("only_in_target,users");
+    });
+
+    it("syncS3 copies between environments and a custom bucket", async () => {
+      fillBucket("newsync-production", { "a.txt": "a", "dir/b.txt": "b" });
+      fillBucket("newsync-staging", { "stale.txt": "stale" });
+      fillBucket("newsync-local", { "stale.txt": "stale" });
+      const cwd = project({ environments: {} });
+      const log: string[] = [];
+      const options = { cwd, log: (message: string) => log.push(message) };
+      const custom = {
+        endpoint: `http://localhost:${storagePort}`,
+        accessKeyId: s3Key,
+        secretAccessKey: s3Secret,
+        bucket: "newsync-local",
+      };
+
+      await syncS3({ source: "production", target: custom, ...options });
+      expect(listBucket("newsync-local")).toEqual(["a.txt", "dir/b.txt"]);
+
+      await syncS3({ source: custom, target: "staging", dryRun: true, ...options });
+      expect(listBucket("newsync-staging")).toEqual(["stale.txt"]);
+      await syncS3({ source: custom, target: "staging", ...options });
+      expect(listBucket("newsync-staging")).toEqual(["a.txt", "dir/b.txt"]);
+
+      expect(log).toEqual([
+        `Syncing custom (newsync-local on localhost:${storagePort})...`,
+        `Done. custom (newsync-local on localhost:${storagePort}) now has the files of the source.`,
+        "Comparing buckets...",
+        "Dry run: nothing changed.",
+        `Syncing staging (newsync-staging on 127.0.0.1:${storagePort})...`,
+        `Done. staging (newsync-staging on 127.0.0.1:${storagePort}) now has the files of the source.`,
+      ]);
+    });
+
+    it("syncS3 throws a SyncError for the same bucket, before changing anything", async () => {
+      fillBucket("newsync-staging", { "keep.txt": "keep" });
+      await expect(
+        syncS3({
+          source: "staging",
+          target: {
+            // Another name for the same storage host and port
+            endpoint: `http://127.0.0.1:${storagePort}/`,
+            accessKeyId: "other",
+            secretAccessKey: "other",
+            bucket: "newsync-staging",
+          },
+          cwd: project(),
+        }),
+      ).rejects.toThrow(SyncError);
+      expect(listBucket("newsync-staging")).toEqual(["keep.txt"]);
     });
   });
 

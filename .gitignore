@@ -4,6 +4,7 @@ dist
 *.log
 *.tgz
 .turbo
+coverage
 
 # Claude Code: personal and generated files
 .claude/worktrees/
