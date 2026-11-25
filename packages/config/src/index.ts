@@ -69,7 +69,11 @@ const cache = new Map<string, Promise<Config>>();
 async function importConfig(file: string): Promise<Config> {
   let module: { default?: unknown };
   try {
-    module = await import(/* @vite-ignore */ pathToFileURL(file).href);
+    // Left to Node: a bundler that follows this import can't resolve a path known only at runtime
+    module = await import(
+      /* @vite-ignore */ /* webpackIgnore: true */ /* turbopackIgnore: true */ pathToFileURL(file)
+        .href
+    );
   } catch (error) {
     throw new ConfigError(
       `Can't load ${file}: ${error instanceof Error ? error.message : String(error)}`,
