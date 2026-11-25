@@ -1,7 +1,6 @@
 {
   "name": "@newcode-team/sync",
   "version": "0.0.0",
-  "private": true,
   "description": "Copy databases and files between environments",
   "type": "module",
   "sideEffects": false,
@@ -14,19 +13,61 @@
   },
   "homepage": "https://github.com/NewCodeDevelopment/tools/tree/main/packages/sync#readme",
   "bugs": "https://github.com/NewCodeDevelopment/tools/issues",
+  "keywords": [
+    "sync",
+    "postgres",
+    "s3",
+    "rclone",
+    "cli"
+  ],
+  "bin": {
+    "newsync": "./dist/cli.mjs"
+  },
   "scripts": {
+    "dev": "tsdown --config tsdown.config.ts --config-loader unrun --watch --no-clean",
+    "build": "tsdown --config tsdown.config.ts --config-loader unrun --no-clean",
+    "build:release": "tsdown --config tsdown.config.ts --config-loader unrun",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "typecheck": "tsc --noEmit",
+    "test": "vitest",
+    "test:ci": "vitest run",
     "clean": "rm -rf .turbo && rm -rf node_modules && rm -rf dist"
   },
+  "dependencies": {
+    "@inquirer/confirm": "^6.4.0",
+    "@inquirer/input": "^5.2.0",
+    "@inquirer/password": "^5.3.1",
+    "@inquirer/select": "^5.3.1",
+    "@newcode-team/env": "workspace:^",
+    "commander": "^15.1.0"
+  },
   "devDependencies": {
+    "@arethetypeswrong/core": "catalog:",
+    "@newcode-team/config": "workspace:*",
     "@types/node": "catalog:",
-    "typescript": "catalog:"
+    "publint": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "unrun": "catalog:",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "@newcode-team/config": "workspace:^"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "engines": {
     "node": ">=24"
+  },
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": "./dist/index.mjs",
+    "./package.json": "./package.json"
   }
 }

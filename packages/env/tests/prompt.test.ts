@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { defaults } from "../src/config";
-import { confirm } from "../src/prompt";
-import { prepareRun } from "../src/run";
+import { prepareRun } from "../src/commands/run/helpers";
+import { defaults } from "../src/lib/config";
+import { confirm } from "../src/lib/prompt";
 import { context, fixture, streams } from "./helpers";
 
 const files = {

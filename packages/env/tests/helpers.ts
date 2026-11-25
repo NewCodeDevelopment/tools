@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { defaults } from "../src/config";
-import type { Streams } from "../src/prompt";
+import { defaults } from "../src/lib/config";
+import type { Streams } from "../src/lib/prompt";
 
 export const cli = fileURLToPath(new URL("../dist/cli.mjs", import.meta.url));
 

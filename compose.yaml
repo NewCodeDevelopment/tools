@@ -1,0 +1,60 @@
+# Postgres and S3 storage for the integration tests of packages/sync. The tests start them:
+#   docker compose up -d --wait && docker compose wait storage-init
+# Test data only: nothing is kept on disk, `docker compose down` removes it.
+name: newcode-tools
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    ports:
+      - "127.0.0.1:${NEWSYNC_POSTGRES_PORT:-55432}:5432"
+    environment:
+      POSTGRES_USER: postgres
+      # Distinct from every other value, so the tests can check it never shows in any output
+      POSTGRES_PASSWORD: newsync-db-secret
+      POSTGRES_DB: postgres
+    tmpfs:
+      - /var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  storage:
+    image: rustfs/rustfs:1.0.6
+    ports:
+      - "127.0.0.1:${NEWSYNC_STORAGE_PORT:-59000}:9000"
+    environment:
+      RUSTFS_ACCESS_KEY: newsync
+      RUSTFS_SECRET_KEY: newsync-secret
+      # Logs to stdout instead of a file in the container
+      RUSTFS_OBS_LOG_DIRECTORY: ""
+    tmpfs:
+      # RustFS runs as uid 10001
+      - /data:uid=10001,gid=10001
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/health/ready"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # Creates the buckets of the test environments once storage is up, then exits
+  storage-init:
+    image: amazon/aws-cli:2.40.4
+    depends_on:
+      storage:
+        condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID: newsync
+      AWS_SECRET_ACCESS_KEY: newsync-secret
+      AWS_DEFAULT_REGION: auto
+      AWS_ENDPOINT_URL: http://storage:9000
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        set -e
+        aws configure set default.s3.addressing_style path
+        for bucket in newsync-production newsync-staging newsync-local; do
+          aws s3api head-bucket --bucket "$$bucket" 2>/dev/null || aws s3api create-bucket --bucket "$$bucket"
+        done

@@ -33,5 +33,21 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      # The newsync integration tests run on Linux only, against the services of compose.yaml.
+      # Elsewhere they skip themselves
+      - name: Install pg_dump 18 and rclone
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y postgresql-client-18 rclone
+          # Ahead of the runner's own Postgres client
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
+
+      - name: Start Postgres and RustFS
+        if: runner.os == 'Linux'
+        run: docker compose up --detach --wait && docker compose wait storage-init
+
       - name: Run tests
         run: pnpm test:ci

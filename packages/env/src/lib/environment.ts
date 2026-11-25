@@ -9,7 +9,7 @@ import {
   type ResolvedConfig,
 } from "./config";
 import { EnvironmentError } from "./errors";
-import { confirm } from "./prompt";
+import { confirm, terminal } from "./prompt";
 
 export const envsDir = ".envs";
 export const baseFile = ".envs/.env";
@@ -205,8 +205,5 @@ export async function confirmEnvironment(
   { cwd = process.cwd() }: { cwd?: string } = {},
 ): Promise<boolean> {
   const config = await loadEnvConfig(cwd);
-  return confirm(environmentSettings(config, name).confirm, name, question, {
-    input: process.stdin,
-    output: process.stderr,
-  });
+  return confirm(environmentSettings(config, name).confirm, name, question, terminal);
 }

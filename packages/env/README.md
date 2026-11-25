@@ -184,7 +184,25 @@ setopt PROMPT_SUBST
 
 ## Development
 
-Part of the [NewCode tools](../..) monorepo. From the repository root:
+Part of the [NewCode tools](../..) monorepo, laid out like `@newcode-team/sync`:
+
+```
+src/
+  cli.ts              the newenv program, registers the commands
+  index.ts            the public API
+  commands/
+    run/              command.ts (newenv <command>), helpers.ts (banner, confirmation)
+    use/              command.ts
+    status/           command.ts
+    init/             command.ts, templates.ts
+  lib/                config, environment (loading and the script API), errors, processes, prompts
+```
+
+- `command.ts` registers the command. Simple logic used once stays inline.
+- `helpers.ts` holds logic that is complex, reused or tested on its own.
+- `lib/` never imports from `commands/`.
+
+From the repository root:
 
 ```bash
 pnpm build        # tsdown, with publint and attw

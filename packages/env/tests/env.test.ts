@@ -1,8 +1,8 @@
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
-import { defaults } from "../src/config";
-import { checkFiles, loadEnv } from "../src/env";
+import { defaults } from "../src/lib/config";
+import { checkFiles, loadEnv } from "../src/lib/environment";
 import { fixture } from "./helpers";
 
 // Env file content, not templates

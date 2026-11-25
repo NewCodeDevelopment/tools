@@ -1,5 +1,10 @@
-export type { Color, EnvConfig, EnvironmentConfig } from "./config";
-export { env } from "./config";
-export type { Environment } from "./env";
-export { confirmEnvironment, currentEnvironment, listEnvironments, loadEnvironment } from "./env";
-export { EnvironmentError } from "./errors";
+export type { Color, EnvConfig, EnvironmentConfig } from "./lib/config";
+export { env } from "./lib/config";
+export type { Environment } from "./lib/environment";
+export {
+  confirmEnvironment,
+  currentEnvironment,
+  listEnvironments,
+  loadEnvironment,
+} from "./lib/environment";
+export { EnvironmentError } from "./lib/errors";

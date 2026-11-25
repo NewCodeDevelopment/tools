@@ -7,6 +7,11 @@ export interface Streams {
 }
 
 /**
+ * Prompts read the terminal and write to stderr, so stdout stays the command's
+ */
+export const terminal: Streams = { input: process.stdin, output: process.stderr };
+
+/**
  * Asks y/N, or to type the name for `"type-name"`. `false` answers yes without asking. Ctrl+C
  * answers no. Throws without a TTY, so agents and CI can't confirm by accident.
  */
