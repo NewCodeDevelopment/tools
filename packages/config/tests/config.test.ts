@@ -160,6 +160,77 @@ describe("loadConfig", () => {
   });
 });
 
+describe("loadConfig edge cases", () => {
+  it("loads a .js config, of a project with type module", async () => {
+    const cwd = fixture({
+      "package.json": JSON.stringify({ type: "module" }),
+      "newcode.config.js": config({ value: "js" }),
+    });
+    expect(await loadConfig({ cwd })).toMatchObject({ value: "js" });
+  });
+
+  it("takes a relative cwd, and returns absolute paths", async () => {
+    const root = fixture({ "newcode.config.mjs": config({ value: 1 }), "app/.keep": "" });
+    vi.spyOn(process, "cwd").mockReturnValue(root);
+
+    expect(findConfig({ cwd: "app" })).toBe(join(root, "newcode.config.mjs"));
+    expect(await loadConfig({ cwd: "./app/../app" })).toMatchObject({
+      root,
+      file: join(root, "newcode.config.mjs"),
+    });
+  });
+
+  it("keeps the configs of two projects apart", async () => {
+    const first = fixture({ "newcode.config.mjs": config({ name: "first" }), ".git/HEAD": "" });
+    const second = fixture({ "newcode.config.mjs": config({ name: "second" }), ".git/HEAD": "" });
+    expect(await loadConfig({ cwd: first })).toMatchObject({ name: "first", root: first });
+    expect(await loadConfig({ cwd: second })).toMatchObject({ name: "second", root: second });
+    expect(await loadConfig({ cwd: first })).toMatchObject({ name: "first" });
+  });
+
+  it("doesn't let a caller change what the next one gets", async () => {
+    const cwd = fixture({ "newcode.config.mjs": config({ value: 1 }) });
+    const first = (await loadConfig({ cwd })) as Record<string, unknown>;
+    first.value = 2;
+    first.root = "changed";
+    expect(await loadConfig({ cwd })).toMatchObject({ value: 1, root: cwd });
+  });
+
+  it("fails every time for a config that can't load", async () => {
+    const cwd = fixture({ "newcode.config.mjs": "throw new Error('boom');" });
+    await expect(loadConfig({ cwd })).rejects.toThrow(/Can't load .*newcode\.config\.mjs: boom/);
+    await expect(loadConfig({ cwd })).rejects.toThrow(ConfigError);
+  });
+
+  it.each([
+    "export default null;",
+    "export default [];",
+    "export default 'x';",
+    "export const a = 1;",
+  ])("refuses %j", async (content) => {
+    const cwd = fixture({ "newcode.config.mjs": content });
+    await expect(loadConfig({ cwd })).rejects.toThrow(
+      /newcode\.config\.mjs must export default an object, e\.g\. defineConfig\(\{ … \}\)$/,
+    );
+  });
+
+  it("names the error ConfigError, so tools can tell it apart", () => {
+    expect(new ConfigError("x").name).toBe("ConfigError");
+    expect(new ConfigError("x")).toBeInstanceOf(Error);
+  });
+});
+
+describe("exports", () => {
+  it("exports exactly the documented API", async () => {
+    expect(Object.keys(await import("../src/index")).toSorted()).toEqual([
+      "ConfigError",
+      "defineConfig",
+      "findConfig",
+      "loadConfig",
+    ]);
+  });
+});
+
 describe("defineConfig", () => {
   it("returns the config unchanged, typed as Config", () => {
     const value = {};

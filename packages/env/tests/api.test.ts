@@ -68,6 +68,50 @@ describe("listEnvironments", () => {
   });
 });
 
+describe("names", () => {
+  it.each([
+    ["staging", "staging"],
+    ["staging\n", "staging"],
+    ["  staging \r\n", "staging"],
+    ["", "local"],
+    ["\n", "local"],
+  ])("reads a current file of %j as %j", (content, name) => {
+    expect(currentEnvironment({ cwd: fixture({ ".envs/current": content }) })).toBe(name);
+  });
+
+  it("lists names with dashes, underscores and digits, and nothing else", () => {
+    const cwd = fixture({
+      ".envs/.env.pre-prod": "",
+      ".envs/.env.qa_2": "",
+      ".envs/.env.Staging": "",
+      ".envs/.env.a.b": "",
+      ".envs/.env.": "",
+      ".envs/env.nodot": "",
+      ".envs/nested/.env.inner": "",
+    });
+    expect(listEnvironments({ cwd })).toEqual(["Staging", "pre-prod", "qa_2"]);
+  });
+
+  it("loads an environment with a dashed name", async () => {
+    const cwd = fixture({ ".envs/.env.pre-prod": "A=1" });
+    const environment = await loadEnvironment("pre-prod", { cwd });
+    expect(environment).toMatchObject({
+      name: "pre-prod",
+      files: [".envs/.env.pre-prod"],
+      values: { A: "1" },
+      // Not production: the defaults of any other environment
+      settings: { color: "yellow", confirm: true },
+    });
+    expect(environment.require()).toEqual({});
+  });
+
+  it("doesn't take a path as a name", async () => {
+    const cwd = fixture({ ".envs/.env.local": "", "other/.env.x": "" });
+    await expect(loadEnvironment("../other/.env.x", { cwd })).rejects.toThrow(EnvironmentError);
+    await expect(loadEnvironment("", { cwd })).rejects.toThrow(EnvironmentError);
+  });
+});
+
 describe("loadEnvironment", () => {
   it("is a named export, also reachable through import * as newenv", () => {
     expect(newenv.loadEnvironment).toBe(loadEnvironment);

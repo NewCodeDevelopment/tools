@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { version } from "../package.json";
 import { envConfig, fixture, linkPackages, printEnv, run, windows } from "./helpers";
 
 const files = {
@@ -25,6 +26,61 @@ describe("arguments", () => {
 
   it("shows the version", async () => {
     expect((await run(["-v"], fixture(files))).stdout).toMatch(/^\d+\.\d+\.\d+\n$/);
+    expect((await run(["--version"], fixture(files))).stdout).toBe(`${version}\n`);
+  });
+
+  // A change here is a change of the command line: update the README with it
+  it("keeps its help as it is", async () => {
+    expect((await run(["--help"], fixture())).stdout).toMatchInlineSnapshot(`
+      "Usage: newenv [options] <command> [args...]
+
+      Run a command with the env files of the selected environment
+
+      Arguments:
+        command        Command to run. Put -- before one named use, status or init
+
+      Options:
+        -v, --version  Show version
+        --confirm      Ask before running, as for confirmScripts
+        -h, --help     Show help
+
+      Commands:
+        use <name>     Switch environment
+        status         Show the environment and its files
+        init           Set up .envs/, the gitignore rules, .envs/.env.local and the
+                       config
+      "
+    `);
+    expect((await run(["use", "--help"], fixture())).stdout).toMatchInlineSnapshot(`
+      "Usage: newenv use [options] <name>
+
+      Switch environment
+
+      Arguments:
+        name        Environment, local deletes .envs/current
+
+      Options:
+        -h, --help  Show help
+      "
+    `);
+    expect((await run(["status", "--help"], fixture())).stdout).toMatchInlineSnapshot(`
+      "Usage: newenv status [options]
+
+      Show the environment and its files
+
+      Options:
+        -h, --help  Show help
+      "
+    `);
+    expect((await run(["init", "--help"], fixture())).stdout).toMatchInlineSnapshot(`
+      "Usage: newenv init [options]
+
+      Set up .envs/, the gitignore rules, .envs/.env.local and the config
+
+      Options:
+        -h, --help  Show help
+      "
+    `);
   });
 
   it("refuses unknown options and missing or extra subcommand arguments", async () => {
@@ -86,7 +142,22 @@ describe("run", () => {
     expect(result.stderr).toMatch(/command not found: newenv-does-not-exist/);
   });
 
-  it.skipIf(windows).each(["SIGTERM", "SIGINT"] as const)(
+  it("doesn't start the command when --confirm can't ask", async () => {
+    const cwd = fixture({ ...files, ".envs/current": "staging" });
+    const touch = `require("node:fs").writeFileSync("ran", "")`;
+    const result = await run(["--confirm", process.execPath, "-e", touch], cwd);
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toMatch(/needs confirmation, no TTY\. Aborted\.\n$/);
+    expect(existsSync(join(cwd, "ran"))).toBe(false);
+
+    // local never asks, --confirm or not
+    writeFileSync(join(cwd, ".envs/current"), "local\n");
+    expect((await run(["--confirm", process.execPath, "-e", touch], cwd)).code).toBe(0);
+    expect(existsSync(join(cwd, "ran"))).toBe(true);
+  });
+
+  it.skipIf(windows).each(["SIGTERM", "SIGINT", "SIGHUP"] as const)(
     "forwards %s to the command",
     async (signal) => {
       const trap = `process.on("${signal}", () => process.exit(42)); console.log("ready"); setInterval(() => {}, 1000)`;

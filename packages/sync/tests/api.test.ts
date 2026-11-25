@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { dirname } from "node:path";
 import { Command } from "commander";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { dbCommand } from "../src/commands/database/command";
 import { s3Command } from "../src/commands/s3/command";
 import * as api from "../src/index";
@@ -182,6 +182,16 @@ describe.skipIf(windows)("syncDatabase", () => {
 
   it("aborts on Ctrl+C: stops the dump, runs nothing more and removes the dump", async () => {
     const tools = setup({ hang: "pg_dump" });
+    // In a terminal Ctrl+C reaches the tool by itself. Here newsync has to pass it on
+    const isTTY = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+    Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
+    onTestFinished(() => {
+      if (isTTY) {
+        Object.defineProperty(process.stdin, "isTTY", isTTY);
+      } else {
+        Reflect.deleteProperty(process.stdin, "isTTY");
+      }
+    });
     const syncing = syncDatabase({
       source: "production",
       target: "staging",
