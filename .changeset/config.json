@@ -3,9 +3,13 @@
   "changelog": "@changesets/cli/changelog",
   "baseBranch": "main",
   "commit": false,
-  "fixed": [],
+  "fixed": [["@newcode-team/config", "@newcode-team/env", "@newcode-team/sync"]],
   "linked": [],
   "access": "public",
   "updateInternalDependencies": "patch",
-  "ignore": []
+  "ignore": [],
+  "privatePackages": {
+    "version": true,
+    "tag": false
+  }
 }

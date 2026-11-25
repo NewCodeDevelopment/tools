@@ -8,7 +8,7 @@ Command-line tools for NewCode projects, released as separate packages under `@n
 | [`@newcode-team/env`](packages/env) | `newenv` | Runs commands with per-environment env files, switches environments, guards dangerous scripts |
 | [`@newcode-team/sync`](packages/sync) | `newsync` | Copies databases and files between environments |
 
-Each package has its own version and changelog. A project installs only the tools it uses.
+The packages always share one version, so matching versions work together. Each has its own changelog, and a project installs only the tools it uses.
 
 ## Development
 
@@ -30,7 +30,7 @@ pnpm test
 
 ## Releases
 
-Changesets in independent mode: every package is versioned and published on its own. Add a changeset with `pnpm changeset` in the pull request; merging to `main` opens a release pull request, and merging that publishes to npm.
+Changesets with one fixed group: a release bumps every package to the same version, also those without changes. Private packages (`sync` until its first release) are bumped but not published. Add a changeset with `pnpm changeset` in the pull request; merging to `main` opens a release pull request, and merging that publishes to npm.
 
 ## License
 
