@@ -1,0 +1,2 @@
+# LF everywhere, also on Windows checkouts, so oxfmt --check passes there
+* text=auto eol=lf
