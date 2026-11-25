@@ -1,5 +1,11 @@
 # @newcode-team/env
 
+## 0.2.2
+
+### Patch Changes
+
+- @newcode-team/config@0.2.2
+
 ## 0.2.1
 
 ### Patch Changes
