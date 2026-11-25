@@ -4,12 +4,14 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main]
+  # So the release can run the same tests first
+  workflow_call:
 jobs:
   build:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout Repo
@@ -34,7 +36,7 @@ jobs:
         run: pnpm typecheck
 
       # The newsync integration tests run on Linux only, against the services of compose.yaml.
-      # Elsewhere they skip themselves
+      # Elsewhere they skip themselves, and the tests with fake tools still run
       - name: Install pg_dump 18 and rclone
         if: runner.os == 'Linux'
         run: |
@@ -50,4 +52,44 @@ jobs:
         run: docker compose up --detach --wait && docker compose wait storage-init
 
       - name: Run tests
+        if: runner.os != 'Linux'
         run: pnpm test:ci
+
+      # With coverage, which fails below the thresholds of each vitest.config.ts. They only hold
+      # where the integration tests run
+      - name: Run tests with coverage
+        if: runner.os == 'Linux'
+        run: pnpm test:coverage
+        env:
+          # Fails instead of skipping when Docker or a tool is missing
+          NEWSYNC_REQUIRE_INTEGRATION: "1"
+
+      - name: Upload coverage
+        if: runner.os == 'Linux' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: packages/*/coverage/lcov.info
+          if-no-files-found: ignore
+
+  # Installs the packed packages with npm into an empty project, as a consumer gets them
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js 24.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
+          cache: pnpm
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Smoke test the packed packages
+        run: pnpm test:smoke

@@ -10,6 +10,8 @@ export default defineConfig({
       // Runs as a child process in the CLI tests, which v8 doesn't see
       exclude: ["src/cli.ts"],
       reporter: ["text", "lcov"],
+      // Just under what the tests reach, so a drop fails. Raise them with the coverage
+      thresholds: { lines: 96, statements: 96, functions: 95, branches: 90 },
     },
   },
 });

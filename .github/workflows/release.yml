@@ -8,8 +8,13 @@ on:
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
 jobs:
+  # Nothing is published that didn't pass the tests
+  test:
+    uses: ./.github/workflows/test.yml
+
   release:
     name: Release
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: write
