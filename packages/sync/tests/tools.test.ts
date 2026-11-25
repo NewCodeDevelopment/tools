@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { devNull } from "node:os";
 import { dirname } from "node:path";
 import { describe, expect, it } from "vitest";
+import { dropSchemasSql, oldSchema } from "../src/commands/database/helpers";
 import {
   fakeProject,
   fakeTools,
@@ -27,7 +28,7 @@ const production = "postgres://app@production.db.example.com:6543/app_production
 const staging = "postgres://app@staging.db.example.com:6543/app_staging?sslmode=require";
 
 describe.skipIf(windows)("db", () => {
-  it("dumps the source, turns the dump into SQL and restores it in one transaction", async () => {
+  it("dumps the source, turns the dump into SQL and restores it with the target's schema set aside", async () => {
     const tools = fakeTools();
     const result = await run(["db", "production", "staging"], fakeProject(), tools.env);
     expect(result.stderr).toBe("");
@@ -42,7 +43,7 @@ describe.skipIf(windows)("db", () => {
       ].join("\n"),
     );
 
-    const [version, dump, restore, psql, ...rest] = tools.calls();
+    const [version, dump, restore, dropBefore, aside, load, dropAfter, ...rest] = tools.calls();
     expect(rest).toEqual([]);
     expect(version?.args).toEqual([
       "--no-psqlrc",
@@ -72,17 +73,33 @@ describe.skipIf(windows)("db", () => {
     expect(restore?.args).toEqual(["--no-owner", "--no-privileges", `--file=${sqlFile}`, dumpFile]);
     expect(dirname(sqlFile)).toBe(dirname(dumpFile));
 
-    expect(psql).toMatchObject({ name: "psql" });
-    expect(psql?.args).toEqual([
+    // Drops what a cut-off run left aside, sets the target's schema aside in one short transaction,
+    // loads the dump statement by statement, then drops the old contents
+    const into = (...args: string[]) => [
       "--no-psqlrc",
       "--quiet",
-      "--single-transaction",
       "--set=ON_ERROR_STOP=1",
       `--output=${devNull}`,
-      '--command=SET client_min_messages = warning; DROP SCHEMA IF EXISTS "public" CASCADE;',
-      `--file=${sqlFile}`,
+      ...args,
       `--dbname=${staging}`,
+    ];
+    const dropFile = flag(dropBefore, "file") ?? "";
+    expect(dirname(dropFile)).toBe(dirname(dumpFile));
+    expect([dropBefore, aside, load, dropAfter].map((call) => call?.name)).toEqual([
+      "psql",
+      "psql",
+      "psql",
+      "psql",
     ]);
+    expect(dropBefore?.args).toEqual(into(`--file=${dropFile}`));
+    expect(aside?.args).toEqual(
+      into(
+        "--single-transaction",
+        `--command=DO $$ BEGIN IF EXISTS (SELECT FROM pg_namespace WHERE nspname = 'public') THEN ALTER SCHEMA "public" RENAME TO "public_newsync_old"; END IF; END $$;`,
+      ),
+    );
+    expect(load?.args).toEqual(into(`--file=${sqlFile}`));
+    expect(dropAfter?.args).toEqual(into(`--file=${dropFile}`));
 
     // The dump holds the source's data: gone afterwards
     expect(existsSync(dirname(dumpFile))).toBe(false);
@@ -113,11 +130,14 @@ describe.skipIf(windows)("db", () => {
       // Reads the dump file, connects nowhere
       ["pg_restore", shell],
       ["psql", { PGPASSWORD: hidden.database }],
+      ["psql", { PGPASSWORD: hidden.database }],
+      ["psql", { PGPASSWORD: hidden.database }],
+      ["psql", { PGPASSWORD: hidden.database }],
     ]);
     expectNothingHidden(result, calls);
   });
 
-  it("dumps and drops every configured schema", async () => {
+  it("dumps and sets aside every configured schema", async () => {
     const tools = fakeTools();
     const cwd = fakeProject({ sync: { database: { schemas: ["public", "drizzle"] } } });
     const result = await run(["db", "production", "local"], cwd, tools.env);
@@ -126,11 +146,28 @@ describe.skipIf(windows)("db", () => {
       /Done\. Schemas public, drizzle of local \(local\.db\.example\.com:6543\/app_local\) now match the source\./,
     );
 
-    const [, dump, , psql] = tools.calls();
+    const [, dump, , , aside] = tools.calls();
     expect(dump?.args.slice(0, 2)).toEqual(['--schema="public"', '--schema="drizzle"']);
-    expect(flag(psql, "command")).toBe(
-      'SET client_min_messages = warning; DROP SCHEMA IF EXISTS "public" CASCADE; DROP SCHEMA IF EXISTS "drizzle" CASCADE;',
+    expect(flag(aside, "command")).toBe(
+      `DO $$ BEGIN IF EXISTS (SELECT FROM pg_namespace WHERE nspname = 'public') THEN ALTER SCHEMA "public" RENAME TO "public_newsync_old"; END IF; END $$; DO $$ BEGIN IF EXISTS (SELECT FROM pg_namespace WHERE nspname = 'drizzle') THEN ALTER SCHEMA "drizzle" RENAME TO "drizzle_newsync_old"; END IF; END $$;`,
     );
+  });
+
+  it("keeps the name of a set-aside schema within Postgres' 63 bytes", () => {
+    expect(oldSchema("public")).toBe("public_newsync_old");
+    const long = "s".repeat(63);
+    expect(oldSchema(long)).toHaveLength(63);
+    expect(oldSchema(long)).toMatch(/^s+_newsync_old$/);
+  });
+
+  it("drops schemas one table per statement, then what the tables left", () => {
+    expect(dropSchemasSql(["public_newsync_old"]).split("\n")).toEqual([
+      "SET client_min_messages = warning;",
+      "SELECT format('DROP TABLE IF EXISTS %I.%I CASCADE', n.nspname, c.relname) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname IN ('public_newsync_old') AND c.relkind IN ('r', 'p') AND NOT c.relispartition",
+      "\\gexec",
+      'DROP SCHEMA IF EXISTS "public_newsync_old" CASCADE;',
+      "",
+    ]);
   });
 
   it("reads the URL from the configured variable", async () => {

@@ -55,7 +55,7 @@ Every failure or abort exits with 1. Ctrl+C on a prompt aborts.
 
 - `pg_dump` of the configured schemas only (custom format, no owner, no privileges). Hosting providers keep their own extensions in other schemas, which a local Postgres can't install.
 - Refuses when `pg_dump` is an older major version than the source server, before dumping.
-- Restores in one transaction: drops the configured schemas with `CASCADE`, then loads the dump. A failure leaves the target untouched. After a success, tables that only existed in the target are gone.
+- Restores without one big transaction, which would lock every table, index, sequence and type at once: more than a hosted Postgres with a small lock table, such as PlanetScale, has room for. Instead it renames the target's configured schemas aside (to `<schema>_newsync_old`), loads the dump statement by statement, then drops the old contents one table at a time. A failure or Ctrl+C during the load drops the half-loaded copy and renames the old schemas back, so the target is as it was. After a success, tables that only existed in the target are gone. Old contents a cut-off run left aside are dropped at the start of the next sync.
 - The migration history comes along when its table lives in a synced schema, so no migrate run is needed afterwards. Drizzle keeps it in `drizzle`: add that schema.
 - The dump goes to a temporary folder that is always removed, also after Ctrl+C.
 - Passwords reach `pg_dump` and `psql` through `PGPASSWORD`, never as process arguments.
