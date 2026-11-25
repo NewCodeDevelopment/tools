@@ -8,10 +8,11 @@
   "author": "NewCode",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/NewCodeDevelopment/newenv.git"
+    "url": "git+https://github.com/NewCodeDevelopment/tools.git",
+    "directory": "packages/env"
   },
-  "homepage": "https://github.com/NewCodeDevelopment/newenv#readme",
-  "bugs": "https://github.com/NewCodeDevelopment/newenv/issues",
+  "homepage": "https://github.com/NewCodeDevelopment/tools/tree/main/packages/env#readme",
+  "bugs": "https://github.com/NewCodeDevelopment/tools/issues",
   "keywords": [
     "env",
     "dotenv",
@@ -32,10 +33,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest",
     "test:ci": "vitest run",
-    "changeset": "changeset",
-    "version-packages": "changeset version",
-    "release": "pnpm build:release && changeset publish",
-    "clean": "rm -rf node_modules && rm -rf dist"
+    "clean": "rm -rf .turbo && rm -rf node_modules && rm -rf dist"
   },
   "dependencies": {
     "@inquirer/confirm": "^6.4.0",
@@ -46,18 +44,15 @@
     "dotenv-expand": "^12.0.3"
   },
   "devDependencies": {
-    "@arethetypeswrong/core": "^0.18.5",
-    "@changesets/cli": "^3.0.3",
+    "@arethetypeswrong/core": "catalog:",
     "@types/cross-spawn": "^6.0.6",
-    "@types/node": "^24.19.2",
+    "@types/node": "catalog:",
     "dotenv-cli": "11.0.0",
-    "oxfmt": "0.78.0",
-    "oxlint": "1.93.0",
-    "publint": "^0.3.25",
-    "tsdown": "^0.23.7",
-    "typescript": "5.9.3",
-    "unrun": "^0.3.1",
-    "vitest": "^5.1.0"
+    "publint": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "unrun": "catalog:",
+    "vitest": "catalog:"
   },
   "publishConfig": {
     "access": "public"
@@ -71,17 +66,5 @@
   "exports": {
     ".": "./dist/index.mjs",
     "./package.json": "./package.json"
-  },
-  "devEngines": {
-    "packageManager": {
-      "name": "pnpm",
-      "version": "11.27.0"
-    },
-    "runtime": {
-      "name": "node",
-      "version": "^24.x",
-      "onFail": "download"
-    }
-  },
-  "packageManager": "pnpm@11.27.0"
+  }
 }

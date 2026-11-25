@@ -1,0 +1,32 @@
+{
+  "name": "@newcode-team/sync",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Copy databases and files between environments",
+  "type": "module",
+  "sideEffects": false,
+  "license": "MIT",
+  "author": "NewCode",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NewCodeDevelopment/tools.git",
+    "directory": "packages/sync"
+  },
+  "homepage": "https://github.com/NewCodeDevelopment/tools/tree/main/packages/sync#readme",
+  "bugs": "https://github.com/NewCodeDevelopment/tools/issues",
+  "scripts": {
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf .turbo && rm -rf node_modules && rm -rf dist"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
