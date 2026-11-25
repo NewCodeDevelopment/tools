@@ -1,6 +1,6 @@
 {
   "name": "@newcode-team/config",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Finds, loads and types newcode.config.ts, the shared config of the NewCode tools",
   "type": "module",
   "sideEffects": false,

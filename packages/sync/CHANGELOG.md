@@ -1,5 +1,13 @@
 # @newcode-team/sync
 
+## 0.2.1
+
+### Patch Changes
+
+- 737868d: `newsync db` verifies a database with `sslmode=verify-full` against the system's trusted roots when no root certificate is set up, such as PlanetScale or Neon from a machine without `~/.postgresql/root.crt`. Only that side's connection changes, so a local Postgres without SSL still connects.
+- @newcode-team/config@0.2.1
+  - @newcode-team/env@0.2.1
+
 ## 0.2.0
 
 ### Minor Changes
