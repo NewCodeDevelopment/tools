@@ -16,6 +16,7 @@ import { environmentSettings, loadConfig } from "./config";
 import {
   baseFile,
   checkFiles,
+  checkKnown,
   currentEnvironment,
   currentFile,
   envsDir,
@@ -100,11 +101,7 @@ if (argv[argv.findIndex((arg) => arg === "--" || !arg.startsWith("-"))] !== "--"
         return;
       }
 
-      const environments = listEnvironments(cwd);
-      if (!environments.includes(name)) {
-        throw new Error(`${envFile} not found. Available: ${environments.join(", ") || "none"}`);
-      }
-
+      checkKnown(cwd, name);
       const config = await loadConfig(cwd);
       if (
         environmentSettings(config, name).confirm === "type-name" &&
@@ -122,7 +119,7 @@ if (argv[argv.findIndex((arg) => arg === "--" || !arg.startsWith("-"))] !== "--"
     .description("Show the environment and its files")
     .action(async () => {
       const config = await loadConfig(cwd);
-      const name = currentEnvironment(cwd);
+      const name = currentEnvironment({ cwd });
       const envFile = `.envs/.env.${name}`;
       const files = [
         ...(existsSync(join(cwd, baseFile)) ? [baseFile] : []),
@@ -142,7 +139,7 @@ if (argv[argv.findIndex((arg) => arg === "--" || !arg.startsWith("-"))] !== "--"
         [
           ["Environment", name],
           ["Files", files.join(" + ")],
-          ["Available", listEnvironments(cwd).join(", ") || "none"],
+          ["Available", listEnvironments({ cwd }).join(", ") || "none"],
           ["Config", config.file],
           [
             "Passthrough",

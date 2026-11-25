@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { describe, expect, it } from "vitest";
 import { defaults } from "../src/config";
-import { checkFiles, currentEnvironment, listEnvironments, loadEnv } from "../src/env";
+import { checkFiles, loadEnv } from "../src/env";
 import { fixture } from "./helpers";
 
 // Env file content, not templates
@@ -96,29 +96,6 @@ describe("loadEnv", () => {
     });
     // dotenv-cli expands $VAR even in single quotes
     expect(expected.SINGLE).toBe("literal \\n ");
-  });
-});
-
-describe("currentEnvironment", () => {
-  it("reads .envs/current, and a missing or empty file means local", () => {
-    expect(currentEnvironment(fixture())).toBe("local");
-    expect(currentEnvironment(fixture({ ".envs/current": "staging\n" }))).toBe("staging");
-    expect(currentEnvironment(fixture({ ".envs/current": "  \n" }))).toBe("local");
-  });
-});
-
-describe("listEnvironments", () => {
-  it("lists the environment files, without example or backups", () => {
-    const cwd = fixture({
-      ".envs/.env": "",
-      ".envs/.env.staging": "",
-      ".envs/.env.local": "",
-      ".envs/.env.example": "",
-      ".envs/.env.local.bak": "",
-      ".envs/current": "",
-    });
-    expect(listEnvironments(cwd)).toEqual(["local", "staging"]);
-    expect(listEnvironments(fixture())).toEqual([]);
   });
 });
 

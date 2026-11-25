@@ -1,7 +1,7 @@
 import { styleText } from "node:util";
 import spawn from "cross-spawn";
-import { type Color, environmentSettings, type ResolvedConfig } from "./config";
-import { checkFiles, currentEnvironment, loadEnv } from "./env";
+import type { Color, ResolvedConfig } from "./config";
+import { currentEnvironment, resolveEnvironment } from "./env";
 import { confirm, type Streams } from "./prompt";
 
 export interface Context {
@@ -35,30 +35,27 @@ export async function prepareRun(
     return env;
   }
 
-  const name = currentEnvironment(cwd);
-  checkFiles(cwd, config, name);
-
-  const loaded = loadEnv(cwd, name, env);
-  const settings = environmentSettings(config, name);
+  const { name, files, values, settings } = resolveEnvironment(
+    cwd,
+    config,
+    currentEnvironment({ cwd }),
+    env,
+  );
   const script = env.npm_lifecycle_event ?? command;
 
   if (name !== "local") {
     const badge = styleText([...badgeStyles[settings.color]], ` ${name.toUpperCase()} `, {
       stream: streams.output,
     });
-    streams.output.write(`${badge} ${script} uses ${loaded.files.join(" + ")}\n`);
+    streams.output.write(`${badge} ${script} uses ${files.join(" + ")}\n`);
   }
 
   const asks = forceConfirm || config.confirmScripts.includes(env.npm_lifecycle_event ?? "");
-  if (
-    asks &&
-    settings.confirm &&
-    !(await confirm(settings.confirm, name, `Run ${script} against ${name}`, streams))
-  ) {
+  if (asks && !(await confirm(settings.confirm, name, `Run ${script} against ${name}`, streams))) {
     throw new Error("Aborted.");
   }
 
-  return loaded.env;
+  return values;
 }
 
 /**
