@@ -1,6 +1,6 @@
 {
   "name": "@newcode-team/sync",
-  "version": "0.0.0",
+  "version": "0.2.0",
   "description": "Copy databases and files between environments",
   "type": "module",
   "sideEffects": false,
