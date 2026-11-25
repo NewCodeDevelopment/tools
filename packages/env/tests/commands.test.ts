@@ -208,7 +208,10 @@ describe("status", () => {
   });
 
   it("shows the passthrough variables that are set", async () => {
-    const cwd = fixture({ ...files, ...envConfig({ passthrough: ["NEWENV_TEST_HOST", "NEWENV_TEST_OTHER"] }) });
+    const cwd = fixture({
+      ...files,
+      ...envConfig({ passthrough: ["NEWENV_TEST_HOST", "NEWENV_TEST_OTHER"] }),
+    });
     expect((await newenv(["status"], cwd)).stdout).not.toMatch(/Passthrough/);
 
     vi.stubEnv("NEWENV_TEST_HOST", "1");
