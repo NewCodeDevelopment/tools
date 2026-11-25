@@ -65,6 +65,9 @@ describe.skipIf(windows)("syncDatabase", () => {
       "pg_dump",
       "pg_restore",
       "psql",
+      "psql",
+      "psql",
+      "psql",
     ]);
     expect(tools.printed).toEqual([
       "Dumping staging (staging.db.example.com:6543/app_staging)...",
@@ -113,7 +116,7 @@ describe.skipIf(windows)("syncDatabase", () => {
       cwd: fixture(),
       log: () => {},
     });
-    expect(tools.calls().map(({ env }) => env)).toEqual([{}, {}, {}, {}]);
+    expect(tools.calls().map(({ env }) => env)).toEqual([{}, {}, {}, {}, {}, {}, {}]);
   });
 
   it("lists tables with dryRun, changing nothing", async () => {
@@ -338,7 +341,7 @@ describe.skipIf(windows)("commands", () => {
     expect(tools.printed[0]).toBe(
       "production (production.db.example.com:6543/app_production) → staging (staging.db.example.com:6543/app_staging)",
     );
-    expect(tools.calls()).toHaveLength(4);
+    expect(tools.calls()).toHaveLength(7);
   });
 
   it("s3 --dry-run passes the option on", async () => {

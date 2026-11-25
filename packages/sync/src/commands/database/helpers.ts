@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { devNull, homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadEnvironment } from "@newcode-team/env";
@@ -215,7 +215,41 @@ export async function listTables(
 }
 
 /**
- * Dumps the schemas of the source and restores them into the target in one transaction
+ * Where a schema's previous contents wait while the copy loads. Postgres cuts names at 63 bytes
+ */
+export const oldSchema = (schema: string): string => `${schema.slice(0, 51)}_newsync_old`;
+
+/**
+ * SQL that drops schemas one table per transaction: `\gexec` runs each generated statement on its
+ * own. Dropping a whole schema at once locks every table, index, sequence and type in it in one
+ * transaction, which is more than a hosted Postgres with a small lock table holds. Names are plain
+ * identifiers (see lib/config.ts), so they need no escaping
+ */
+export function dropSchemasSql(schemas: string[]): string {
+  return [
+    "SET client_min_messages = warning;",
+    `SELECT format('DROP TABLE IF EXISTS %I.%I CASCADE', n.nspname, c.relname) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname IN (${schemas.map((schema) => `'${schema}'`).join(", ")}) AND c.relkind IN ('r', 'p') AND NOT c.relispartition`,
+    "\\gexec",
+    // What the tables left: types, functions, sequences and views of their own
+    ...schemas.map((schema) => `DROP SCHEMA IF EXISTS "${schema}" CASCADE;`),
+    "",
+  ].join("\n");
+}
+
+/**
+ * SQL that renames each schema that exists, which locks only the schema itself
+ */
+export const renameSchemasSql = (renames: [from: string, to: string][]): string =>
+  renames
+    .map(
+      ([from, to]) =>
+        `DO $$ BEGIN IF EXISTS (SELECT FROM pg_namespace WHERE nspname = '${from}') THEN ALTER SCHEMA "${from}" RENAME TO "${to}"; END IF; END $$;`,
+    )
+    .join(" ");
+
+/**
+ * Dumps the schemas of the source and restores them into the target. The target's schemas are
+ * renamed aside first and dropped after the copy loads, or renamed back when it fails
  */
 export async function copyDatabase(
   source: Database,
@@ -266,25 +300,58 @@ export async function copyDatabase(
       process.env,
     );
 
-    // Dropping with CASCADE also removes tables that only exist in the target. Drop and restore run
-    // in one transaction, so a failed restore leaves the target as it was
+    // Not in one transaction: Postgres holds every lock until the end, and a Payload-sized schema
+    // needs thousands, more than a hosted Postgres with a small lock table has. Instead the target's
+    // schemas move aside, the dump loads statement by statement, and the old ones are dropped after
+    // a success or renamed back after a failure. Dropping also removes tables only in the target
     log(`Restoring into ${describeDatabase(target)}...`);
     const to = connection(target.url);
-    const drop = schemas.map((schema) => `DROP SCHEMA IF EXISTS "${schema}" CASCADE;`);
+    const psql = (...args: string[]) => [
+      "--no-psqlrc",
+      "--quiet",
+      "--set=ON_ERROR_STOP=1",
+      `--output=${devNull}`,
+      ...args,
+      `--dbname=${to.dbname}`,
+    ];
+    const aside = schemas.map((schema): [string, string] => [schema, oldSchema(schema)]);
+    const old = aside.map(([, name]) => name);
+    const dropOldFile = join(dir, "drop-old.sql");
+    const dropNewFile = join(dir, "drop-new.sql");
+    writeFileSync(dropOldFile, dropSchemasSql(old));
+    writeFileSync(dropNewFile, dropSchemasSql(schemas));
+
+    // A run that was cut off can have left old contents aside
+    await step("psql", psql(`--file=${dropOldFile}`), to.env);
     await step(
       "psql",
-      [
-        "--no-psqlrc",
-        "--quiet",
-        "--single-transaction",
-        "--set=ON_ERROR_STOP=1",
-        `--output=${devNull}`,
-        `--command=SET client_min_messages = warning; ${drop.join(" ")}`,
-        `--file=${sqlFile}`,
-        `--dbname=${to.dbname}`,
-      ],
+      psql("--single-transaction", `--command=${renameSchemasSql(aside)}`),
       to.env,
     );
+    try {
+      await step("psql", psql(`--file=${sqlFile}`), to.env);
+    } catch (error) {
+      // Also after Ctrl+C, so not through step()
+      log(`Putting ${describeDatabase(target)} back as it was...`);
+      const back = aside.map(([schema, name]): [string, string] => [name, schema]);
+      await runTool("psql", psql(`--file=${dropNewFile}`), { env: to.env })
+        .then(() =>
+          runTool("psql", psql("--single-transaction", `--command=${renameSchemasSql(back)}`), {
+            env: to.env,
+          }),
+        )
+        .catch(() => {
+          throw new SyncError(
+            `The restore failed and ${describeDatabase(target)} could not be put back: ${schemas.join(", ")} may be incomplete, with the previous contents in ${old.join(", ")}. Run the sync again to replace them.`,
+          );
+        });
+      throw error;
+    }
+    await runTool("psql", psql(`--file=${dropOldFile}`), { env: to.env }).catch(() => {
+      throw new SyncError(
+        `The copy is complete, but the previous contents in ${old.join(", ")} of ${describeDatabase(target)} could not be dropped. The next sync drops them.`,
+      );
+    });
     // Migration history comes along only when its table is in one of the schemas
     const one = schemas.length === 1;
     log(

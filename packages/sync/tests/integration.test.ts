@@ -62,6 +62,37 @@ function sql(database: string, statement: string): string {
   ).trim();
 }
 
+/**
+ * Runs a psql script in a test database. Outside a transaction every statement commits on its own,
+ * also those `\gexec` generates
+ */
+function sqlScript(database: string, script: string): void {
+  execFileSync(
+    "psql",
+    [
+      "--no-psqlrc",
+      "--quiet",
+      "--set=ON_ERROR_STOP=1",
+      "--file=-",
+      `--dbname=${adminUrl(database)}`,
+    ],
+    { env: adminEnv, input: script, stdio: ["pipe", "ignore", "inherit"] },
+  );
+}
+
+/**
+ * A schema the size of a Payload project: 32 enums and 170 tables, each with a primary key, a
+ * foreign key and 4 more indexes. Restoring it in one transaction takes about 8,000 locks
+ */
+const payloadSizedSchema = `
+SELECT format('CREATE TYPE enum_%s AS ENUM (''a'', ''b'')', g) FROM generate_series(1, 32) g \\gexec
+CREATE TABLE parents (id serial PRIMARY KEY);
+INSERT INTO parents DEFAULT VALUES;
+SELECT format('CREATE TABLE t_%1$s (id serial PRIMARY KEY, parent_id int REFERENCES parents (id), title text, body jsonb, kind enum_%2$s, created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now())', g, 1 + g % 32) FROM generate_series(1, 170) g \\gexec
+SELECT format('CREATE INDEX t_%1$s_parent ON t_%1$s (parent_id); CREATE INDEX t_%1$s_title ON t_%1$s (title); CREATE INDEX t_%1$s_created ON t_%1$s (created_at); CREATE INDEX t_%1$s_updated ON t_%1$s (updated_at)', g) FROM generate_series(1, 170) g \\gexec
+SELECT format('INSERT INTO t_%1$s (parent_id, title, body) VALUES (1, ''row %1$s'', ''{}'')', g) FROM generate_series(1, 170) g \\gexec
+`;
+
 const rcloneEnv = {
   ...process.env,
   RCLONE_CONFIG_TEST_TYPE: "s3",
@@ -210,6 +241,12 @@ describe.skipIf(reason !== undefined)("integration", { timeout: 60_000 }, () => 
       "SELECT string_agg(tablename, ',' ORDER BY tablename) FROM pg_tables WHERE schemaname = 'public'",
     );
 
+  const schemas = (database: string) =>
+    sql(
+      database,
+      "SELECT string_agg(nspname, ',' ORDER BY nspname) FROM pg_namespace WHERE nspname NOT LIKE 'pg\\_%' AND nspname <> 'information_schema'",
+    );
+
   describe("s3", () => {
     it("copies production to staging on one remote, deleting files only in the target", async () => {
       fillBucket("newsync-production", { "a.txt": "a", "media/b.jpg": "b" });
@@ -293,8 +330,10 @@ describe.skipIf(reason !== undefined)("integration", { timeout: 60_000 }, () => 
       const result = await run(["db", "production", "staging"], project());
       expect(result.code).toBe(1);
       expect(result.stderr).toMatch(/newsync: psql failed\./);
+      expect(result.stdout).toMatch(/Putting staging \(.*\) back as it was\.\.\./);
       expect(tables(databases.staging)).toBe("only_in_target,users");
       expect(sql(databases.staging, "SELECT name FROM users")).toBe("Old");
+      expect(schemas(databases.staging)).toBe("public");
       expectNoSecrets(result);
     });
 
@@ -462,6 +501,35 @@ describe.skipIf(reason !== undefined)("integration", { timeout: 60_000 }, () => 
       expect(result.code, result.stderr).toBe(0);
       expect(sql(databases.local, sum)).toBe(sql(databases.production, sum));
       expect(sql(databases.local, "SELECT count(*) FROM big")).toBe("20000");
+    });
+
+    it("replaces a schema with more objects than the server's lock table holds at once", async () => {
+      // compose.yaml gives Postgres a lock table as small as a hosted one, so replacing this in
+      // one transaction fails with "out of shared memory"
+      sqlScript(databases.production, payloadSizedSchema);
+      sqlScript(databases.staging, payloadSizedSchema);
+      sql(databases.staging, "CREATE TABLE only_in_target (id int)");
+      const shape =
+        "SELECT (SELECT count(*) FROM pg_tables WHERE schemaname = 'public') || ' tables, ' || (SELECT count(*) FROM pg_indexes WHERE schemaname = 'public') || ' indexes, ' || (SELECT string_agg(title, ',' ORDER BY id) FROM t_170)";
+
+      const result = await run(["db", "production", "staging"], project());
+      expect(result.code, result.stderr).toBe(0);
+      expect(sql(databases.staging, shape)).toBe(sql(databases.production, shape));
+      expect(sql(databases.staging, shape)).toBe("171 tables, 851 indexes, row 170");
+      expect(schemas(databases.staging)).toBe("public");
+    });
+
+    it("drops the previous contents a cut-off run left aside", async () => {
+      seedSource(databases.production);
+      sql(
+        databases.staging,
+        "CREATE SCHEMA public_newsync_old; CREATE TABLE public_newsync_old.stale (id int);",
+      );
+
+      const result = await run(["db", "production", "staging"], project());
+      expect(result.code, result.stderr).toBe(0);
+      expect(tables(databases.staging)).toBe("users");
+      expect(schemas(databases.staging)).toBe("public");
     });
 
     it("replaces only the configured schemas", async () => {
