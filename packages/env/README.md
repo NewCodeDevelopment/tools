@@ -96,6 +96,38 @@ The example is the first of `.envs/.env.example`, `.example-env` and `.env.examp
 
 A `.env*` pattern also matches the `.envs` folder, and git can't re-include a file in an ignored folder. So the folder is re-included first, then its contents ignored, except the example.
 
+## Use in scripts
+
+The same loading and checks as the CLI, for scripts that need another environment, e.g. a db sync from staging to local:
+
+```ts
+import * as newenv from "@newcode-team/env";
+
+const staging = await newenv.loadEnvironment("staging");
+const local = await newenv.loadEnvironment("local");
+const from = staging.require("DATABASE_URL");
+const to = local.require("DATABASE_URL", "S3_BUCKET");
+
+if (!(await newenv.confirmEnvironment("local", "Overwrite local with staging"))) {
+  process.exit(1);
+}
+```
+
+Named imports work too: `import { loadEnvironment } from "@newcode-team/env"`.
+
+| Function | Returns |
+|---|---|
+| `currentEnvironment()` | Name in `.envs/current`, or `local` |
+| `listEnvironments()` | Names with a `.envs/.env.<name>` file, sorted |
+| `loadEnvironment(name?)` | `{ name, files, values, settings, require }`. The current environment without a name |
+| `confirmEnvironment(name, question)` | `true` when confirmed. Follows `environments.<name>.confirm`, throws without a TTY |
+
+- Only `.envs/.env` and `.envs/.env.<name>` by default, not the shell. A script often runs with another environment in `process.env`, which must not fill in keys the file lacks. Pass `{ shell: process.env }` to merge like the CLI.
+- Never writes to `process.env`.
+- `require(...keys)` returns the keys, and throws when one is missing or empty.
+- Refusals throw an `EnvironmentError` with the CLI's messages. With a `passthrough` variable set, `loadEnvironment()` returns `process.env`, and a named environment throws.
+- Every function takes `{ cwd }`, default `process.cwd()`.
+
 ## Config
 
 Optional. `newenv.config.ts`, `.mjs` or `.js` in the project root. `newenv init` creates one:

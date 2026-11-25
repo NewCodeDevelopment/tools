@@ -2,7 +2,14 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parse } from "dotenv";
 import { expand } from "dotenv-expand";
-import type { ResolvedConfig } from "./config";
+import {
+  type EnvironmentConfig,
+  environmentSettings,
+  loadConfig,
+  type ResolvedConfig,
+} from "./config";
+import { EnvironmentError } from "./errors";
+import { confirm } from "./prompt";
 
 export const envsDir = ".envs";
 export const baseFile = ".envs/.env";
@@ -19,18 +26,32 @@ export const rootEnvFiles = [
   ".env.production.local",
 ];
 
+export interface Environment {
+  name: string;
+  /**
+   * The files that were loaded, relative to cwd
+   */
+  files: string[];
+  values: Record<string, string>;
+  settings: Required<EnvironmentConfig>;
+  /**
+   * The given keys. Throws an `EnvironmentError` when one is missing or empty
+   */
+  require<const Key extends string>(...keys: Key[]): Record<Key, string>;
+}
+
 /**
  * The selected environment: the name in .envs/current, or local
  */
-export function currentEnvironment(cwd: string): string {
+export function currentEnvironment({ cwd = process.cwd() }: { cwd?: string } = {}): string {
   const file = join(cwd, currentFile);
   return (existsSync(file) && readFileSync(file, "utf8").trim()) || "local";
 }
 
 /**
- * The environments with a .envs/.env.<name> file
+ * The environments with a .envs/.env.<name> file, without example, sorted
  */
-export function listEnvironments(cwd: string): string[] {
+export function listEnvironments({ cwd = process.cwd() }: { cwd?: string } = {}): string[] {
   const dir = join(cwd, envsDir);
   return existsSync(dir)
     ? readdirSync(dir)
@@ -41,12 +62,24 @@ export function listEnvironments(cwd: string): string[] {
 }
 
 /**
+ * Throws when the environment has no .envs/.env.<name> file, listing the ones that do
+ */
+export function checkKnown(cwd: string, name: string): void {
+  const environments = listEnvironments({ cwd });
+  if (!environments.includes(name)) {
+    throw new EnvironmentError(
+      `.envs/.env.${name} not found. Available: ${environments.join(", ") || "none"}`,
+    );
+  }
+}
+
+/**
  * Throws when root env files exist, the base holds forbidden keys or the environment file is missing
  */
 export function checkFiles(cwd: string, config: ResolvedConfig, name: string): void {
   const rootFiles = rootEnvFiles.filter((file) => existsSync(join(cwd, file)));
   if (rootFiles.length > 0) {
-    throw new Error(
+    throw new EnvironmentError(
       `${rootFiles.join(", ")} in the project root. Move into .envs/: mv -n ${rootFiles.join(" ")} .envs/`,
     );
   }
@@ -56,14 +89,14 @@ export function checkFiles(cwd: string, config: ResolvedConfig, name: string): v
     ? Object.keys(parse(readFileSync(base))).filter((key) => config.forbiddenInBase.includes(key))
     : [];
   if (forbidden.length > 0) {
-    throw new Error(
+    throw new EnvironmentError(
       `${forbidden.join(", ")} in the shared ${baseFile}. Move to .envs/.env.<name> for each environment.`,
     );
   }
 
   const envFile = `.envs/.env.${name}`;
   if (!existsSync(join(cwd, envFile))) {
-    throw new Error(
+    throw new EnvironmentError(
       name === "local"
         ? `${envFile} not found. Create it with: newenv init`
         : `${envFile} not found. Switch back with: newenv use local`,
@@ -72,20 +105,108 @@ export function checkFiles(cwd: string, config: ResolvedConfig, name: string): v
 }
 
 /**
- * Merges the shell env, the base and the environment file: the last one wins. Expands variables
- * over the merged env, the same way dotenv-cli does.
+ * Merges the shell env when given, the base and the environment file: the last one wins. Expands
+ * variables over the merged env, the same way dotenv-cli does. Never touches process.env.
  */
 export function loadEnv(
   cwd: string,
   name: string,
-  shellEnv: NodeJS.ProcessEnv,
+  shell?: Record<string, string | undefined>,
 ): { env: Record<string, string>; files: string[] } {
   const files = [baseFile, `.envs/.env.${name}`].filter((file) => existsSync(join(cwd, file)));
   const env: Record<string, string> = Object.assign(
-    {},
-    shellEnv,
+    Object.fromEntries(Object.entries(shell ?? {}).filter(([, value]) => value !== undefined)),
     ...files.map((file) => parse(readFileSync(join(cwd, file)))),
   );
   expand({ parsed: env, processEnv: env });
   return { env, files };
+}
+
+function createEnvironment(
+  name: string,
+  files: string[],
+  values: Record<string, string>,
+  settings: Required<EnvironmentConfig>,
+): Environment {
+  return {
+    name,
+    files,
+    values,
+    settings,
+    require<const Key extends string>(...keys: Key[]): Record<Key, string> {
+      const missing = keys.filter((key) => !values[key]);
+      if (missing.length > 0) {
+        throw new EnvironmentError(
+          `${missing.join(", ")} missing in environment "${name}" (${files.join(", ") || "passthrough"})`,
+        );
+      }
+      return Object.fromEntries(keys.map((key) => [key, values[key]])) as Record<Key, string>;
+    },
+  };
+}
+
+/**
+ * Checks the files and loads the environment. The CLI and loadEnvironment share it.
+ */
+export function resolveEnvironment(
+  cwd: string,
+  config: ResolvedConfig,
+  name: string,
+  shell?: Record<string, string | undefined>,
+): Environment {
+  checkFiles(cwd, config, name);
+  const { env, files } = loadEnv(cwd, name, shell);
+  return createEnvironment(name, files, env, environmentSettings(config, name));
+}
+
+/**
+ * Loads an environment with the CLI's checks, the current one without a name. Only the env files
+ * by default. With `shell`, merges shell, base and environment file like the CLI does. Never
+ * writes to process.env.
+ */
+export async function loadEnvironment(
+  name?: string,
+  { cwd = process.cwd(), shell }: { cwd?: string; shell?: Record<string, string | undefined> } = {},
+): Promise<Environment> {
+  const config = await loadConfig(cwd);
+  const host = shell ?? process.env;
+  const passthrough = config.passthrough.filter((key) => host[key]);
+
+  if (passthrough.length > 0) {
+    if (name !== undefined) {
+      throw new EnvironmentError(
+        `Can't load ${name}: ${passthrough.join(", ")} set, files ignored (passthrough).`,
+      );
+    }
+    const current = currentEnvironment({ cwd });
+    return createEnvironment(
+      current,
+      [],
+      Object.fromEntries(
+        Object.entries(host).filter((entry): entry is [string, string] => entry[1] !== undefined),
+      ),
+      environmentSettings(config, current),
+    );
+  }
+
+  if (name !== undefined) {
+    checkKnown(cwd, name);
+  }
+  return resolveEnvironment(cwd, config, name ?? currentEnvironment({ cwd }), shell);
+}
+
+/**
+ * Asks like the CLI does for confirmScripts, following environments.<name>.confirm: false answers
+ * yes without asking, true asks y/N, "type-name" asks to type the name. Throws without a TTY.
+ */
+export async function confirmEnvironment(
+  name: string,
+  question: string,
+  { cwd = process.cwd() }: { cwd?: string } = {},
+): Promise<boolean> {
+  const config = await loadConfig(cwd);
+  return confirm(environmentSettings(config, name).confirm, name, question, {
+    input: process.stdin,
+    output: process.stderr,
+  });
 }

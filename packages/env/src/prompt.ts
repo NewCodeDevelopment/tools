@@ -1,4 +1,5 @@
 import type { Readable, Writable } from "node:stream";
+import { EnvironmentError } from "./errors";
 
 export interface Streams {
   input: Readable & { isTTY?: boolean };
@@ -6,17 +7,20 @@ export interface Streams {
 }
 
 /**
- * Asks y/N, or to type the name for `"type-name"`. Ctrl+C answers no. Throws without a TTY, so
- * agents and CI can't confirm by accident.
+ * Asks y/N, or to type the name for `"type-name"`. `false` answers yes without asking. Ctrl+C
+ * answers no. Throws without a TTY, so agents and CI can't confirm by accident.
  */
 export async function confirm(
-  mode: true | "type-name",
+  mode: boolean | "type-name",
   name: string,
   question: string,
   streams: Streams,
 ): Promise<boolean> {
+  if (!mode) {
+    return true;
+  }
   if (!streams.input.isTTY) {
-    throw new Error(`${question}: needs confirmation, no TTY. Aborted.`);
+    throw new EnvironmentError(`${question}: needs confirmation, no TTY. Aborted.`);
   }
 
   // Imported on demand: most runs never ask, and inquirer is the slowest dependency to load
