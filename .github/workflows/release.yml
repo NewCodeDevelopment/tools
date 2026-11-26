@@ -39,8 +39,9 @@ jobs:
 
       - name: Create Release Pull Request or Publish to npm
         id: changesets
-        uses: changesets/action@v1
+        # v2 is the one for Changesets CLI v3: v1 looks for "New tag:" lines that v3 no longer
+        # prints, so it pushed no tags and created no GitHub releases
+        uses: changesets/action@v2
         with:
-          publish: pnpm release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          publish-script: pnpm release
+          github-token: ${{ secrets.GITHUB_TOKEN }}
