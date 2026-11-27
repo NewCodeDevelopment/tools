@@ -4,8 +4,48 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 import { fileURLToPath } from "node:url";
+import { Command } from "commander";
+import { vi } from "vitest";
+import { initCommand } from "../src/commands/init/command";
+import { runCommand } from "../src/commands/run/command";
+import { statusCommand } from "../src/commands/status/command";
+import { useCommand } from "../src/commands/use/command";
 import { defaults } from "../src/lib/config";
-import type { Streams } from "../src/lib/prompt";
+import { type Streams, terminal } from "../src/lib/prompt";
+
+const realTerminal = { ...terminal };
+
+/**
+ * Puts the real terminal back after `newenv`
+ */
+export const restoreTerminal = () => Object.assign(terminal, realTerminal);
+
+/**
+ * Runs a newenv command line in this process, in the project at cwd, with the commands wired as
+ * cli.ts does. Returns what it printed, and what the prompt wrote. With an answer, the prompt is a
+ * terminal that types it. Call vi.restoreAllMocks and restoreTerminal after
+ */
+export async function newenv(args: string[], cwd: string, answer?: string) {
+  vi.spyOn(process, "cwd").mockReturnValue(cwd);
+  const printed: string[] = [];
+  vi.spyOn(console, "log").mockImplementation((message: string) => {
+    printed.push(message);
+  });
+  const errors: string[] = [];
+  vi.spyOn(console, "error").mockImplementation((message: string) => {
+    errors.push(message);
+  });
+  const prompt = streams(answer);
+  Object.assign(terminal, { input: prompt.input, output: prompt.output });
+
+  const program = new Command("newenv").exitOverride();
+  runCommand(program);
+  useCommand(program);
+  statusCommand(program);
+  initCommand(program);
+  await program.parseAsync(args, { from: "user" });
+  return { stdout: printed.join("\n"), stderr: errors.join("\n"), prompt: prompt.written() };
+}
 
 export const cli = fileURLToPath(new URL("../dist/cli.mjs", import.meta.url));
 

@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -17,7 +17,7 @@ describe("arguments", () => {
     const help = await run([], fixture(files));
     expect(help.code).toBe(0);
     expect(help.stdout).toMatch(/Usage: newenv \[options\] <command> \[args\.\.\.\]/);
-    expect(help.stdout).toMatch(/use <name> +Switch environment/);
+    expect(help.stdout).toMatch(/use \[options\] \[name\] +Switch environment/);
 
     const missing = await run(["--confirm"], fixture(files));
     expect(missing.code).toBe(1);
@@ -37,30 +37,33 @@ describe("arguments", () => {
       Run a command with the env files of the selected environment
 
       Arguments:
-        command        Command to run. Put -- before one named use, status or init
+        command               Command to run. Put -- before one named use, status or
+                              init
 
       Options:
-        -v, --version  Show version
-        --confirm      Ask before running, as for confirmScripts
-        -h, --help     Show help
+        -v, --version         Show version
+        --confirm             Ask before running, as for confirmScripts
+        -h, --help            Show help
 
       Commands:
-        use <name>     Switch environment
-        status         Show the environment and its files
-        init           Set up .envs/, the gitignore rules, .envs/.env.local and the
-                       config
+        use [options] [name]  Switch environment
+        status                Show the environment and its files
+        init [options]        Set up .envs/, the gitignore rules, .envs/.env.local and
+                              the config
       "
     `);
     expect((await run(["use", "--help"], fixture())).stdout).toMatchInlineSnapshot(`
-      "Usage: newenv use [options] <name>
+      "Usage: newenv use [options] [name]
 
       Switch environment
 
       Arguments:
-        name        Environment, local deletes .envs/current
+        name              Environment to switch to
 
       Options:
-        -h, --help  Show help
+        --inherit         In a workspace member: follow the root again
+        --keep-overrides  At a workspace root: keep the members' own environments
+        -h, --help        Show help
       "
     `);
     expect((await run(["status", "--help"], fixture())).stdout).toMatchInlineSnapshot(`
@@ -78,6 +81,7 @@ describe("arguments", () => {
       Set up .envs/, the gitignore rules, .envs/.env.local and the config
 
       Options:
+        --shell     Print the zsh prompt badge instead, create nothing
         -h, --help  Show help
       "
     `);
@@ -88,7 +92,9 @@ describe("arguments", () => {
     expect(unknown.code).toBe(1);
     expect(unknown.stderr).toBe("newenv: unknown option '--nope'\n");
 
-    expect((await run(["use"], fixture(files))).stderr).toMatch(/missing required argument 'name'/);
+    expect((await run(["use"], fixture(files))).stderr).toMatch(
+      /Give an environment, e.g. newenv use staging/,
+    );
     expect((await run(["status", "x"], fixture(files))).stderr).toMatch(/too many arguments/);
   });
 
@@ -458,4 +464,63 @@ describe("init", () => {
     expect(readFileSync(join(cwd, "newcode.config.mjs"), "utf8")).toBe(content);
     expect(existsSync(join(cwd, "newcode.config.ts"))).toBe(false);
   });
+});
+
+const zsh = spawnSync("zsh", ["-f", "-c", "true"]).status === 0;
+
+describe("prompt badge", () => {
+  it("prints the zsh snippet with init --shell, and creates nothing", async () => {
+    const cwd = fixture();
+    const { code, stdout } = await run(["init", "--shell"], cwd);
+    expect(code).toBe(0);
+    expect(stdout).toMatch(/^# newenv prompt badge, from: newenv init --shell\n/);
+    expect(stdout).toMatch(/\n_app_env_prompt\(\) \{\n/);
+    expect(existsSync(join(cwd, ".envs"))).toBe(false);
+    expect(existsSync(join(cwd, ".gitignore"))).toBe(false);
+
+    // The README shows the same snippet
+    const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+    expect(readme).toContain(`\`\`\`zsh\n${stdout}\`\`\``);
+  });
+
+  it.skipIf(!zsh)(
+    "shows the nearest selection, and marks a differing override at the root",
+    async () => {
+      const cwd = fixture({
+        ".git/HEAD": "",
+        ".envs/current": "production\n",
+        "apps/a/.envs/.env.local": "",
+        "apps/b/.envs/current": "staging",
+        "apps/b/src/index.ts": "",
+      });
+      const snippet = join(cwd, "newenv.zsh");
+      writeFileSync(snippet, (await run(["init", "--shell"], cwd)).stdout);
+      const badge = (dir: string) =>
+        execFileSync(
+          "zsh",
+          ["-f", "-c", 'source "$1"; cd "$2"; _app_env_prompt', "zsh", snippet, dir],
+          {
+            encoding: "utf8",
+          },
+        );
+      const red = (label: string) => `%K{red}%F{white}%B ${label} %b%f%k `;
+      const yellow = (label: string) => `%K{yellow}%F{black} ${label} %f%k `;
+
+      expect(badge(cwd)).toBe(red("PRODUCTION*"));
+      expect(badge(join(cwd, "apps/a"))).toBe(red("PRODUCTION"));
+      expect(badge(join(cwd, "apps/b/src"))).toBe(yellow("STAGING"));
+
+      // A local override shows nothing in the app, and still differs from the root
+      writeFileSync(join(cwd, "apps/b/.envs/current"), "local\n");
+      expect(badge(join(cwd, "apps/b"))).toBe("");
+      expect(badge(cwd)).toBe(red("PRODUCTION*"));
+
+      // Nothing selected at the root: local, marked only when an app differs
+      writeFileSync(join(cwd, ".envs/current"), "");
+      expect(badge(cwd)).toBe("");
+      writeFileSync(join(cwd, "apps/b/.envs/current"), "staging\n");
+      expect(badge(cwd)).toBe(yellow("LOCAL*"));
+      expect(badge(join(cwd, "apps/a"))).toBe("");
+    },
+  );
 });

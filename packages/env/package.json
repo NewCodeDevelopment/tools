@@ -42,7 +42,8 @@
     "commander": "^15.1.0",
     "cross-spawn": "^7.0.6",
     "dotenv": "^17.4.2",
-    "dotenv-expand": "^12.0.3"
+    "dotenv-expand": "^12.0.3",
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@arethetypeswrong/core": "catalog:",
