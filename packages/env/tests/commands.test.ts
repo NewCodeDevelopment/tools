@@ -1,17 +1,11 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { Command } from "commander";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { initCommand } from "../src/commands/init/command";
 import { gitignoreBlock } from "../src/commands/init/templates";
-import { runCommand } from "../src/commands/run/command";
-import { statusCommand } from "../src/commands/status/command";
-import { useCommand } from "../src/commands/use/command";
 import * as api from "../src/index";
 import { EnvironmentError, errorMessage } from "../src/lib/errors";
 import { spawnCommand } from "../src/lib/process";
-import { terminal } from "../src/lib/prompt";
-import { envConfig, fixture, streams, windows } from "./helpers";
+import { envConfig, fixture, newenv, restoreTerminal, windows } from "./helpers";
 
 // The commands in this process, as cli.ts wires them. cli.test.ts runs the built file
 
@@ -22,38 +16,10 @@ const files = {
   ".envs/.env.production": "WHERE=production",
 };
 
-const realTerminal = { ...terminal };
-
-/**
- * Runs a newenv command line in the project at cwd. Returns what it printed, and what the prompt
- * wrote. With an answer, the prompt is a terminal that types it
- */
-async function newenv(args: string[], cwd: string, answer?: string) {
-  vi.spyOn(process, "cwd").mockReturnValue(cwd);
-  const printed: string[] = [];
-  vi.spyOn(console, "log").mockImplementation((message: string) => {
-    printed.push(message);
-  });
-  const errors: string[] = [];
-  vi.spyOn(console, "error").mockImplementation((message: string) => {
-    errors.push(message);
-  });
-  const prompt = streams(answer);
-  Object.assign(terminal, { input: prompt.input, output: prompt.output });
-
-  const program = new Command("newenv").exitOverride();
-  runCommand(program);
-  useCommand(program);
-  statusCommand(program);
-  initCommand(program);
-  await program.parseAsync(args, { from: "user" });
-  return { stdout: printed.join("\n"), stderr: errors.join("\n"), prompt: prompt.written() };
-}
-
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
-  Object.assign(terminal, realTerminal);
+  restoreTerminal();
   process.exitCode = undefined;
 });
 
@@ -78,6 +44,7 @@ describe("exports", () => {
       "env",
       "listEnvironments",
       "loadEnvironment",
+      "selectedEnvironment",
     ]);
   });
 });

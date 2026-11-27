@@ -12,17 +12,30 @@ import { loadConfig } from "@newcode-team/config";
 import type { Command } from "commander";
 import { resolveConfig } from "../../lib/config";
 import { envsDir } from "../../lib/environment";
-import { configTemplate, envSection, exampleFiles, gitignoreBlock } from "./templates";
+import {
+  configTemplate,
+  envSection,
+  exampleFiles,
+  gitignoreBlock,
+  shellSnippet,
+} from "./templates";
 
 /**
  * `newenv init`: sets up .envs/, the gitignore rules, .envs/.env.local and newcode.config.ts.
- * Existing files are kept: an existing config only gets the section to add printed
+ * Existing files are kept: an existing config only gets the section to add printed. `--shell`
+ * prints the zsh prompt badge instead
  */
 export function initCommand(program: Command): void {
   program
     .command("init")
     .description("Set up .envs/, the gitignore rules, .envs/.env.local and the config")
-    .action(async () => {
+    .option("--shell", "Print the zsh prompt badge instead, create nothing")
+    .action(async (options: { shell?: boolean }) => {
+      if (options.shell) {
+        console.log(shellSnippet);
+        return;
+      }
+
       const cwd = process.cwd();
       const loaded = await loadConfig({ cwd });
       const config = resolveConfig(loaded.env, loaded.file);

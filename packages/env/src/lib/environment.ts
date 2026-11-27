@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { parse } from "dotenv";
 import { expand } from "dotenv-expand";
 import {
@@ -10,6 +10,7 @@ import {
 } from "./config";
 import { EnvironmentError } from "./errors";
 import { confirm, terminal } from "./prompt";
+import { findWorkspace } from "./workspace";
 
 export const envsDir = ".envs";
 export const baseFile = ".envs/.env";
@@ -40,12 +41,61 @@ export interface Environment {
   require<const Key extends string>(...keys: Key[]): Record<Key, string>;
 }
 
+export interface Selection {
+  name: string;
+  /**
+   * Where the name comes from. `root`: the .envs/current of the workspace root, or of the folder
+   * itself in a single-app repo. `override`: a .envs/current below the workspace root, e.g. an
+   * app's own. `default`: none, so local
+   */
+  source: "root" | "override" | "default";
+  /**
+   * The .envs/current the name was read from, absolute
+   */
+  file?: string;
+  /**
+   * The workspace root, absolute. Missing in a single-app repo
+   */
+  workspace?: string;
+}
+
 /**
- * The selected environment: the name in .envs/current, or local
+ * The name in dir/.envs/current. `undefined` when the file is missing or empty
+ */
+export function readSelection(dir: string): string | undefined {
+  const file = join(dir, currentFile);
+  return (existsSync(file) && readFileSync(file, "utf8").trim()) || undefined;
+}
+
+/**
+ * The selected environment and where it comes from: the nearest .envs/current from cwd up to the
+ * workspace root, only cwd's own in a single-app repo, or local without one
+ */
+export function selectedEnvironment({ cwd = process.cwd() }: { cwd?: string } = {}): Selection {
+  const start = resolve(cwd);
+  const workspace = findWorkspace(start)?.root;
+  const top = workspace ?? start;
+  for (let dir = start; ; dir = dirname(dir)) {
+    const name = readSelection(dir);
+    if (name) {
+      return {
+        name,
+        source: dir === top ? "root" : "override",
+        file: join(dir, currentFile),
+        workspace,
+      };
+    }
+    if (dir === top || dirname(dir) === dir) {
+      return { name: "local", source: "default", workspace };
+    }
+  }
+}
+
+/**
+ * The selected environment: the nearest .envs/current from cwd up to the workspace root, or local
  */
 export function currentEnvironment({ cwd = process.cwd() }: { cwd?: string } = {}): string {
-  const file = join(cwd, currentFile);
-  return (existsSync(file) && readFileSync(file, "utf8").trim()) || "local";
+  return selectedEnvironment({ cwd }).name;
 }
 
 /**
