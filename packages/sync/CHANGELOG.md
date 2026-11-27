@@ -1,5 +1,13 @@
 # @newcode-team/sync
 
+## 0.3.0
+
+### Patch Changes
+
+- Updated dependencies [fa6d565]
+  - @newcode-team/env@0.3.0
+  - @newcode-team/config@0.3.0
+
 ## 0.2.2
 
 ### Patch Changes
