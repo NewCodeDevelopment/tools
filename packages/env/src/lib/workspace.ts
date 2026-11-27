@@ -1,5 +1,5 @@
 import { existsSync, globSync, readdirSync, readFileSync } from "node:fs";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 
 export interface Workspace {
   /**
@@ -109,12 +109,17 @@ export async function findMembers(workspace: Workspace): Promise<string[]> {
   return [
     ...(hasEnvFiles(root) ? [root] : []),
     ...[...new Set(packages)].toSorted((a, b) =>
-      relative(root, a).localeCompare(relative(root, b)),
+      relativePath(root, a).localeCompare(relativePath(root, b)),
     ),
   ];
 }
 
 /**
+ * A relative path with `/` on every OS, so output and labels read the same on Windows
+ */
+export const relativePath = (from: string, to: string) => relative(from, to).split(sep).join("/");
+
+/**
  * How a member is named in output: its path from the root, `(root)` for the root itself
  */
-export const memberLabel = (root: string, dir: string) => relative(root, dir) || "(root)";
+export const memberLabel = (root: string, dir: string) => relativePath(root, dir) || "(root)";

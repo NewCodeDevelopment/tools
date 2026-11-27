@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { dirname, join } from "node:path";
 import { environmentSettings, loadEnvConfig } from "../../lib/config";
 import {
   currentFile,
@@ -10,7 +10,7 @@ import {
 } from "../../lib/environment";
 import { EnvironmentError } from "../../lib/errors";
 import { confirm, terminal } from "../../lib/prompt";
-import { memberLabel, type Workspace } from "../../lib/workspace";
+import { memberLabel, relativePath, type Workspace } from "../../lib/workspace";
 
 /**
  * Asks before switching when the environment's confirm is "type-name", following the config found
@@ -41,7 +41,7 @@ export function describeSelection(cwd: string, { name, source, file, workspace }
   const from = dirname(dirname(file ?? ""));
   return from === workspace
     ? `follows the workspace root (${name})`
-    : `follows ${relative(cwd, from) || "its own override"} (${name})`;
+    : `follows ${relativePath(cwd, from) || "its own override"} (${name})`;
 }
 
 /**

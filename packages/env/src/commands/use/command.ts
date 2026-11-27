@@ -1,5 +1,5 @@
 import { existsSync, rmSync, writeFileSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import type { Command } from "commander";
 import {
   checkKnown,
@@ -9,7 +9,13 @@ import {
   selectedEnvironment,
 } from "../../lib/environment";
 import { EnvironmentError } from "../../lib/errors";
-import { findMembers, findWorkspace, memberLabel, type Workspace } from "../../lib/workspace";
+import {
+  findMembers,
+  findWorkspace,
+  memberLabel,
+  relativePath,
+  type Workspace,
+} from "../../lib/workspace";
 import { confirmSwitch, describeSelection, switchWorkspace } from "./helpers";
 
 interface Options {
@@ -103,7 +109,7 @@ async function switchFolder(cwd: string, name: string): Promise<void> {
 async function overrideMember(workspace: Workspace, cwd: string, name: string): Promise<void> {
   if (!existsSync(join(cwd, envsDir))) {
     throw new EnvironmentError(
-      `No .envs/ here. Run newenv use inside a workspace member, or at the workspace root (${relative(cwd, workspace.root)}) to switch them all.`,
+      `No .envs/ here. Run newenv use inside a workspace member, or at the workspace root (${relativePath(cwd, workspace.root)}) to switch them all.`,
     );
   }
 

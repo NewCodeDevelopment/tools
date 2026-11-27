@@ -8,7 +8,7 @@ import {
   loadEnvironment,
   selectedEnvironment,
 } from "../src/index";
-import { findMembers, findWorkspace } from "../src/lib/workspace";
+import { findMembers, findWorkspace, relativePath } from "../src/lib/workspace";
 import { context, envConfig, fixture, newenv, restoreTerminal } from "./helpers";
 
 // A pnpm monorepo: two apps and a package with env files of their own, and one without
@@ -76,7 +76,7 @@ describe("findMembers", () => {
       "apps/node_modules/x/.envs/.env.local": "",
     });
     const workspace = { root: cwd, manifest: "pnpm-workspace.yaml" } as const;
-    expect((await findMembers(workspace)).map((dir) => dir.slice(cwd.length + 1))).toEqual([
+    expect((await findMembers(workspace)).map((dir) => relativePath(cwd, dir))).toEqual([
       "apps/antwerpen",
       "apps/brussel",
       "apps/gent",
@@ -88,7 +88,7 @@ describe("findMembers", () => {
       join(cwd, "pnpm-workspace.yaml"),
       'packages:\n  - "./apps/*/"\n  - "!apps/legacy"\n',
     );
-    expect((await findMembers(workspace)).map((dir) => dir.slice(cwd.length + 1))).toEqual([
+    expect((await findMembers(workspace)).map((dir) => relativePath(cwd, dir))).toEqual([
       "apps/antwerpen",
       "apps/brussel",
       "apps/gent",
